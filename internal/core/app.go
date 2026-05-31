@@ -15,6 +15,7 @@ import (
 	"retrox/internal/metadata"
 	"retrox/internal/openvgdb"
 	"retrox/internal/scanner"
+	"retrox/internal/sources"
 )
 
 // App is the singleton wiring container handed to every HTTP handler so
@@ -27,6 +28,9 @@ type App struct {
 	Thumbs    *libretrothumbs.Client
 	Metadata  *metadata.Provider
 	Downloads *download.Manager
+	// Sources is the registry of remote ROM catalogs the UI can browse.
+	// Order matters only for the picker in the sidebar.
+	Sources []sources.Source
 
 	// defaultProfileUID is provisioned at boot and used transparently by
 	// the UI: favorites and history belong to this single instance-wide
@@ -78,6 +82,10 @@ func New() (*App, error) {
 		OpenVGDB: store,
 		Thumbs:   thumbs,
 		Metadata: metadata.New(store, thumbs),
+		Sources: []sources.Source{
+			sources.NewArchiveOrg(),
+			sources.NewPDRoms(),
+		},
 	}
 	app.Downloads = download.New(database, app.destDir)
 

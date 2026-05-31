@@ -9,6 +9,8 @@ import type {
   Platform,
   ScanProgress,
   Settings,
+  SourceInfo,
+  SourcePage,
   Status,
 } from "@/lib/types"
 
@@ -82,6 +84,21 @@ export const api = {
 
   downloadOpenVGDB: () =>
     req<OpenVGDBDownloadResult>("/metadata/openvgdb/download", { method: "POST" }),
+
+  sources: () => req<SourceInfo[]>("/sources"),
+  sourceBrowse: (id: string, params: { platform?: string; q?: string; page?: number }) => {
+    const qs = new URLSearchParams()
+    if (params.platform) qs.set("platform", params.platform)
+    if (params.q) qs.set("q", params.q)
+    if (params.page && params.page > 1) qs.set("page", String(params.page))
+    const suffix = qs.toString() ? `?${qs}` : ""
+    return req<SourcePage>(`/sources/${encodeURIComponent(id)}/browse${suffix}`)
+  },
+  sourceDownload: (id: string, input: { romId: string; platformId: string; title: string }) =>
+    req<Download>(`/sources/${encodeURIComponent(id)}/download`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
 }
 
 export type ImageKind = "cover" | "screenshot"

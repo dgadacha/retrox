@@ -132,3 +132,29 @@ export interface OpenVGDBDownloadResult {
   releases: number
   path: string
 }
+
+export interface SourceInfo {
+  id: string
+  name: string
+  description: string
+  downloadable: boolean
+  supportedPlatforms: string[]
+}
+
+export interface SourceROM {
+  sourceId: string
+  id: string
+  title: string
+  platformId: string
+  description?: string
+  coverUrl?: string
+  sizeBytes?: number
+  downloadable: boolean
+  externalUrl: string
+}
+
+export interface SourcePage {
+  items: SourceROM[]
+  hasMore: boolean
+  nextPage: number
+}

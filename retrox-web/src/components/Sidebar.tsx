@@ -1,6 +1,7 @@
 import clsx from "clsx"
 import {
   Download as DownloadIcon,
+  Globe,
   History,
   Library as LibraryIcon,
   Settings as SettingsIcon,
@@ -78,6 +79,9 @@ export function Sidebar() {
         )}
 
         <Section title="Système">
+          <SidebarLink to="/sources" Icon={Globe}>
+            Sources
+          </SidebarLink>
           <SidebarLink to="/downloads" Icon={DownloadIcon}>
             Téléchargements
           </SidebarLink>
