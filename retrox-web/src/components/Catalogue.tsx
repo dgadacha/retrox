@@ -110,17 +110,34 @@ function PlatformPicker() {
 
 function PlatformTile({ platform }: { platform: CatalogPlatform }) {
   const gradient = platformTheme[platform.id] ?? "from-slate-700 via-slate-800 to-slate-950"
+  const [logoFailed, setLogoFailed] = useState(false)
+  // Logos live under public/static/consoles/ so they're served by the
+  // existing /static/* Go route in prod. Missing files (saturn, arcade)
+  // 404 → onError → gradient + Gamepad2 fallback.
+  const logoSrc = `/static/consoles/${platform.id}.svg`
+
   return (
     <Link
       to={`/catalogue?platform=${encodeURIComponent(platform.id)}`}
       className={`group relative flex aspect-[5/3] flex-col justify-between overflow-hidden rounded-xl bg-gradient-to-br ${gradient} p-4 ring-1 ring-inset ring-white/10 outline-none transition hover:-translate-y-1 hover:ring-white/30 hover:shadow-[0_18px_40px_-15px_rgba(0,0,0,0.6)] focus-visible:ring-accent-500`}
     >
-      <Gamepad2 className="h-6 w-6 opacity-30 transition group-hover:opacity-50" strokeWidth={1.5} />
+      <div className="flex flex-1 items-center justify-center">
+        {!logoFailed ? (
+          <img
+            src={logoSrc}
+            alt={platform.name}
+            onError={() => setLogoFailed(true)}
+            className="max-h-16 w-auto max-w-[80%] object-contain drop-shadow-[0_2px_8px_rgba(0,0,0,0.5)] transition group-hover:scale-105"
+          />
+        ) : (
+          <Gamepad2 className="h-12 w-12 text-white/40" strokeWidth={1.5} />
+        )}
+      </div>
       <div>
-        <p className="line-clamp-2 text-base font-bold tracking-tight text-white drop-shadow">
+        <p className="line-clamp-2 text-sm font-bold tracking-tight text-white drop-shadow">
           {platform.name}
         </p>
-        <p className="mt-1 text-[11px] font-semibold uppercase tracking-wider text-white/70">
+        <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-wider text-white/70">
           {platform.count.toLocaleString("fr")} jeux
         </p>
       </div>

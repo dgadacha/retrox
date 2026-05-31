@@ -16,6 +16,9 @@
 /retrox-web/node_modules/
 /retrox-web/dist/
 
+# Console logos are committed (curated bundle from scripts/fetch-console-logos.sh).
+# Keep them out of any catch-all rule above by leaving this comment as a guard.
+
 # Packaging artifacts
 /dist/
 *.zip
