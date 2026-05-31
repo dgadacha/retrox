@@ -34,7 +34,7 @@ export function Sidebar() {
   const unsortedCount = platformCounts.get("") ?? 0
 
   return (
-    <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-ink-700 bg-ink-900 lg:flex">
+    <aside className="sticky top-0 hidden h-screen w-64 shrink-0 self-start flex-col border-r border-ink-700 bg-ink-900 lg:flex">
       <div className="flex items-center gap-2 px-5 py-5">
         <Wordmark className="text-2xl" />
         {statusQ.data?.scanning && <Spinner className="ml-auto h-4 w-4" />}
