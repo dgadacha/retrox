@@ -61,8 +61,8 @@ function OpenVGDBSection() {
 
   return (
     <Card
-      title="Source de métadonnées — OpenVGDB"
-      desc="Base SQLite de jaquettes, descriptions et infos jeu maintenue par la communauté. Téléchargée une fois, fonctionne entièrement hors-ligne, sans compte. Source : github.com/OpenVGDB/OpenVGDB."
+      title="Index hors-ligne — OpenVGDB"
+      desc="Base SQLite (~9 MB) qui permet au scanner d'identifier précisément tes ROMs par hash CRC32. Fonctionne entièrement hors-ligne, sans compte. Si IGDB est configuré, le catalogue browse passe sur IGDB ; OpenVGDB ne sert plus que pour le scan."
     >
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="space-y-2 text-sm">
