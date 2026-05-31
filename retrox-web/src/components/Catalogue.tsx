@@ -39,35 +39,36 @@ export function CataloguePage() {
 // Platform picker
 // -----------------------------------------------------------------------------
 
-// platformTheme maps each catalog id to a manufacturer-themed Tailwind
-// gradient. New platforms fall back to a neutral slate gradient.
-const platformTheme: Record<string, string> = {
-  nes:          "from-red-700 via-red-800 to-rose-950",
-  snes:         "from-violet-700 via-purple-800 to-indigo-950",
-  n64:          "from-emerald-600 via-green-800 to-emerald-950",
-  gb:           "from-stone-600 via-stone-700 to-stone-900",
-  gbc:          "from-fuchsia-600 via-purple-700 to-indigo-950",
-  gba:          "from-violet-600 via-purple-700 to-fuchsia-900",
-  nds:          "from-sky-600 via-blue-700 to-indigo-950",
-  gamecube:     "from-indigo-600 via-violet-700 to-purple-950",
-  wii:          "from-zinc-100 via-zinc-300 to-zinc-500 text-zinc-900",
-  mastersystem: "from-blue-700 via-sky-800 to-slate-950",
-  megadrive:    "from-sky-600 via-blue-700 to-cyan-950",
-  gamegear:     "from-cyan-600 via-blue-700 to-slate-900",
-  sega32x:      "from-rose-700 via-pink-800 to-fuchsia-950",
-  saturn:       "from-slate-700 via-slate-800 to-zinc-950",
-  dreamcast:    "from-orange-500 via-amber-700 to-yellow-900",
-  psx:          "from-zinc-700 via-zinc-800 to-zinc-950",
-  ps2:          "from-blue-800 via-indigo-900 to-slate-950",
-  psp:          "from-zinc-700 via-zinc-900 to-black",
-  pcengine:     "from-orange-600 via-amber-700 to-red-900",
-  neogeo:       "from-yellow-600 via-amber-700 to-red-900",
-  ngp:          "from-orange-500 via-orange-700 to-amber-900",
-  atari2600:    "from-amber-700 via-orange-800 to-stone-950",
-  atari7800:    "from-rose-700 via-red-800 to-stone-950",
-  lynx:         "from-yellow-600 via-orange-700 to-red-900",
-  wonderswan:   "from-sky-600 via-blue-700 to-indigo-900",
-  arcade:       "from-violet-600 via-fuchsia-700 to-purple-950",
+// platformAccent maps each catalog id to a discreet manufacturer accent
+// shown as a thin top bar — keeps a hint of brand colour without making
+// the whole card scream. New platforms fall back to the violet accent.
+const platformAccent: Record<string, string> = {
+  nes: "bg-red-600",
+  snes: "bg-violet-600",
+  n64: "bg-emerald-500",
+  gb: "bg-stone-500",
+  gbc: "bg-fuchsia-500",
+  gba: "bg-purple-500",
+  nds: "bg-sky-500",
+  gamecube: "bg-indigo-500",
+  wii: "bg-zinc-300",
+  mastersystem: "bg-blue-500",
+  megadrive: "bg-cyan-500",
+  gamegear: "bg-cyan-400",
+  sega32x: "bg-rose-500",
+  saturn: "bg-slate-400",
+  dreamcast: "bg-orange-500",
+  psx: "bg-zinc-400",
+  ps2: "bg-blue-500",
+  psp: "bg-zinc-500",
+  pcengine: "bg-orange-500",
+  neogeo: "bg-yellow-500",
+  ngp: "bg-orange-400",
+  atari2600: "bg-amber-600",
+  atari7800: "bg-red-500",
+  lynx: "bg-yellow-400",
+  wonderswan: "bg-sky-500",
+  arcade: "bg-fuchsia-500",
 }
 
 function PlatformPicker() {
@@ -109,36 +110,37 @@ function PlatformPicker() {
 }
 
 function PlatformTile({ platform }: { platform: CatalogPlatform }) {
-  const gradient = platformTheme[platform.id] ?? "from-slate-700 via-slate-800 to-slate-950"
+  const accent = platformAccent[platform.id] ?? "bg-accent-500"
   const [logoFailed, setLogoFailed] = useState(false)
   // Logos live under public/static/consoles/ so they're served by the
   // existing /static/* Go route in prod. Missing files (saturn, arcade)
-  // 404 → onError → gradient + Gamepad2 fallback.
+  // 404 → onError → Gamepad2 fallback.
   const logoSrc = `/static/consoles/${platform.id}.svg`
 
   return (
     <Link
       to={`/catalogue?platform=${encodeURIComponent(platform.id)}`}
-      className={`group relative flex aspect-[5/3] flex-col justify-between overflow-hidden rounded-xl bg-gradient-to-br ${gradient} p-4 ring-1 ring-inset ring-white/10 outline-none transition hover:-translate-y-1 hover:ring-white/30 hover:shadow-[0_18px_40px_-15px_rgba(0,0,0,0.6)] focus-visible:ring-accent-500`}
+      className="group flex flex-col overflow-hidden rounded-xl bg-ink-800 ring-1 ring-inset ring-white/5 outline-none transition hover:-translate-y-1 hover:ring-accent-500/60 hover:shadow-[0_18px_40px_-15px_rgba(0,0,0,0.6)] focus-visible:ring-accent-500"
     >
-      <div className="flex flex-1 items-center justify-center">
+      <span className={`block h-0.5 w-full ${accent}`} />
+      <div className="flex h-32 items-center justify-center bg-zinc-100 px-6">
         {!logoFailed ? (
           <img
             src={logoSrc}
             alt={platform.name}
             onError={() => setLogoFailed(true)}
-            className="max-h-16 w-auto max-w-[80%] object-contain drop-shadow-[0_2px_8px_rgba(0,0,0,0.5)] transition group-hover:scale-105"
+            className="max-h-16 w-auto max-w-full object-contain transition group-hover:scale-105"
           />
         ) : (
-          <Gamepad2 className="h-12 w-12 text-white/40" strokeWidth={1.5} />
+          <Gamepad2 className="h-12 w-12 text-zinc-400" strokeWidth={1.5} />
         )}
       </div>
-      <div>
-        <p className="line-clamp-2 text-sm font-bold tracking-tight text-white drop-shadow">
+      <div className="flex items-center justify-between gap-2 px-4 py-3">
+        <p className="line-clamp-1 text-sm font-semibold text-text-100">
           {platform.name}
         </p>
-        <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-wider text-white/70">
-          {platform.count.toLocaleString("fr")} jeux
+        <p className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-text-500">
+          {platform.count.toLocaleString("fr")}
         </p>
       </div>
     </Link>
