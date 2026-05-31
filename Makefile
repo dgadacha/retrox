@@ -14,11 +14,20 @@ build: web
 run: build
 	./$(BIN)
 
-# Dev: run the Go API and the rsbuild dev server (proxies /api) separately.
+# Dev — backend (:50000) + frontend hot-reload (:50001) in parallel, with
+# coloured prefixed output. Installs frontend deps on first run. Ctrl-C
+# kills both process trees cleanly.
 .PHONY: dev
 dev:
-	@echo "API:      go run ."
-	@echo "Frontend: cd retrox-web && npm run dev   → http://localhost:50001"
+	@./scripts/dev.sh
+
+.PHONY: test
+test:
+	go test ./...
+
+.PHONY: package
+package: build
+	./scripts/package.sh
 
 .PHONY: tidy
 tidy:
