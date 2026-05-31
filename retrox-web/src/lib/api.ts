@@ -1,0 +1,93 @@
+import type {
+  Download,
+  EmulatorView,
+  Favorite,
+  Game,
+  OpenVGDBDownloadResult,
+  PlayHistory,
+  PlayResolved,
+  Platform,
+  ScanProgress,
+  Settings,
+  Status,
+} from "@/lib/types"
+
+const BASE = "/api/v1"
+
+// req unwraps the { data } / { error } envelope and throws the server's
+// French error message on a non-2xx response so callers can surface it.
+async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(BASE + path, {
+    headers: init?.body ? { "Content-Type": "application/json" } : undefined,
+    ...init,
+  })
+  let body: any
+  const text = await res.text()
+  if (text) {
+    try {
+      body = JSON.parse(text)
+    } catch {
+      body = undefined
+    }
+  }
+  if (!res.ok) throw new Error(body?.error || `Erreur ${res.status}`)
+  return (body?.data ?? body) as T
+}
+
+export interface UpdateSettingsInput {
+  romDirs: string[]
+  retroarchBin: string
+  retroarchCores: string
+}
+
+export const api = {
+  status: () => req<Status>("/status"),
+  platforms: () => req<Platform[]>("/platforms"),
+
+  games: (platform?: string) =>
+    req<Game[]>("/games" + (platform ? `?platform=${encodeURIComponent(platform)}` : "")),
+  game: (id: number) => req<Game>(`/games/${id}`),
+  play: (id: number) => req<PlayResolved>(`/games/${id}/play`, { method: "POST" }),
+
+  scan: () => req<{ started: boolean }>("/library/scan", { method: "POST" }),
+  scanStatus: () => req<ScanProgress>("/library/scan/status"),
+
+  downloads: () => req<Download[]>("/downloads"),
+  createDownload: (input: { url: string; platformId: string; title: string }) =>
+    req<Download>("/downloads", { method: "POST", body: JSON.stringify(input) }),
+  cancelDownload: (id: number) => req<unknown>(`/downloads/${id}`, { method: "DELETE" }),
+
+  emulators: () => req<EmulatorView[]>("/emulators"),
+  setEmulator: (platformId: string, input: { command: string; args: string; core: string }) =>
+    req<unknown>(`/emulators/${encodeURIComponent(platformId)}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+  deleteEmulator: (platformId: string) =>
+    req<unknown>(`/emulators/${encodeURIComponent(platformId)}`, { method: "DELETE" }),
+
+  history: (uid: string) => req<PlayHistory[]>(`/profiles/${encodeURIComponent(uid)}/history`),
+  favorites: (uid: string) => req<Favorite[]>(`/profiles/${encodeURIComponent(uid)}/favorites`),
+  addFavorite: (uid: string, gameId: number) =>
+    req<unknown>(`/profiles/${encodeURIComponent(uid)}/favorites`, {
+      method: "POST",
+      body: JSON.stringify({ gameId }),
+    }),
+  removeFavorite: (uid: string, gameId: number) =>
+    req<unknown>(`/profiles/${encodeURIComponent(uid)}/favorites/${gameId}`, { method: "DELETE" }),
+
+  settings: () => req<Settings>("/settings"),
+  updateSettings: (input: UpdateSettingsInput) =>
+    req<Settings>("/settings", { method: "PUT", body: JSON.stringify(input) }),
+
+  downloadOpenVGDB: () =>
+    req<OpenVGDBDownloadResult>("/metadata/openvgdb/download", { method: "POST" }),
+}
+
+export type ImageKind = "cover" | "screenshot"
+
+// gameImage points an <img> at the backend media proxy (which disk-caches
+// the upstream OpenVGDB / libretro-thumbnails fetches).
+export function gameImage(id: number, kind: ImageKind): string {
+  return `${BASE}/games/${id}/image/${kind}`
+}

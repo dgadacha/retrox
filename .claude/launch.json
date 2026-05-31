@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "retrox",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "RETROX_SERVER_PORT=50000",
+        "go",
+        "run",
+        "."
+      ],
+      "port": 50000
+    }
+  ]
+}
