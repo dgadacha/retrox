@@ -153,8 +153,34 @@ export interface SourceROM {
   externalUrl: string
 }
 
-export interface SourcePage {
-  items: SourceROM[]
+export interface CatalogRelease {
+  releaseId: number
+  title: string
+  coverUrl?: string
+  openvgdbSystemId: number
+  systemShortName?: string
+  region?: string
+  platformId: string
+}
+
+export interface CatalogReleaseDetail extends CatalogRelease {
+  description?: string
+  genre?: string
+  developer?: string
+  publisher?: string
+  releaseDate?: string
+  backCoverUrl?: string
+}
+
+export interface CatalogPage {
+  items: CatalogRelease[]
+  total: number
+  page: number
   hasMore: boolean
-  nextPage: number
+}
+
+export interface CatalogSourceGroup {
+  source: SourceInfo
+  items: SourceROM[]
+  error?: string
 }

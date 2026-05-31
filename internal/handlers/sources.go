@@ -3,39 +3,20 @@ package handlers
 import (
 	"errors"
 	"net/http"
-	"strconv"
 
 	"retrox/internal/sources"
 
 	"github.com/labstack/echo/v4"
 )
 
+// HandleListSources returns a descriptor for every registered source so
+// the UI can render badges like "Internet Archive · téléchargement direct".
 func (h *Handler) HandleListSources(c echo.Context) error {
 	out := make([]sources.Info, 0, len(h.App.Sources))
 	for _, s := range h.App.Sources {
 		out = append(out, sources.InfoFrom(s))
 	}
 	return RespondOK(c, out)
-}
-
-func (h *Handler) HandleBrowseSource(c echo.Context) error {
-	src := h.findSource(c.Param("id"))
-	if src == nil {
-		return RespondErr(c, http.StatusNotFound, "source inconnue")
-	}
-	page, _ := strconv.Atoi(c.QueryParam("page"))
-	if page < 1 {
-		page = 1
-	}
-	p, err := src.Browse(c.Request().Context(), sources.BrowseOptions{
-		PlatformID: c.QueryParam("platform"),
-		Query:      c.QueryParam("q"),
-		Page:       page,
-	})
-	if err != nil {
-		return RespondErr(c, http.StatusBadGateway, err.Error())
-	}
-	return RespondOK(c, p)
 }
 
 type sourceDownloadReq struct {
@@ -46,7 +27,9 @@ type sourceDownloadReq struct {
 
 // HandleDownloadFromSource resolves the source-internal id to a direct
 // URL and enqueues it through the existing download manager so the file
-// lands in ./roms/<platform>/ and triggers an automatic rescan.
+// lands in ./roms/<platform>/ and triggers an automatic rescan. Called
+// when the user picks a candidate from the catalog detail page's
+// "sources" pick-list.
 func (h *Handler) HandleDownloadFromSource(c echo.Context) error {
 	src := h.findSource(c.Param("id"))
 	if src == nil {

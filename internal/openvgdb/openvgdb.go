@@ -37,16 +37,58 @@ var ErrNotReady = errors.New("openvgdb: database not downloaded yet")
 
 // GameInfo is the flattened metadata row the scanner consumes.
 type GameInfo struct {
-	OpenVGDBID  int
-	Title       string
-	Description string
-	Genre       string
-	Developer   string
-	Publisher   string
-	ReleaseDate string // free-form ("July 1993", "Mar 22, 1996", "1996")
-	Region      string
-	CoverURL    string // gamefaqs.gamespot.com hotlink, no auth needed
+	OpenVGDBID   int
+	Title        string
+	Description  string
+	Genre        string
+	Developer    string
+	Publisher    string
+	ReleaseDate  string // free-form ("July 1993", "Mar 22, 1996", "1996")
+	Region       string
+	CoverURL     string // gamefaqs.gamespot.com hotlink, no auth needed
 	BackCoverURL string
+}
+
+// Release is one entry in OpenVGDB's catalogue (one game/region/dump
+// combo). The catalog page browses these directly — same fields as
+// GameInfo plus the IDs we need to navigate.
+type Release struct {
+	ReleaseID        int    `json:"releaseId"`
+	Title            string `json:"title"`
+	CoverURL         string `json:"coverUrl,omitempty"`
+	OpenVGDBSystemID int    `json:"openvgdbSystemId"`
+	SystemShortName  string `json:"systemShortName,omitempty"`
+	Region           string `json:"region,omitempty"`
+}
+
+// ReleaseDetail extends Release with all the descriptive fields the
+// catalogue detail page renders.
+type ReleaseDetail struct {
+	Release
+	Description string `json:"description,omitempty"`
+	Genre       string `json:"genre,omitempty"`
+	Developer   string `json:"developer,omitempty"`
+	Publisher   string `json:"publisher,omitempty"`
+	ReleaseDate string `json:"releaseDate,omitempty"`
+	BackCoverURL string `json:"backCoverUrl,omitempty"`
+}
+
+// CatalogQuery filters the ListReleases call. SystemIDs limits to the
+// given OpenVGDB system IDs (empty = all). Query is a case-insensitive
+// substring match on the release title.
+type CatalogQuery struct {
+	SystemIDs []int
+	Query     string
+	Page      int // 1-based
+	PageSize  int // default 60
+}
+
+// CatalogPage is one page of catalog results.
+type CatalogPage struct {
+	Items   []Release `json:"items"`
+	Total   int       `json:"total"`
+	Page    int       `json:"page"`
+	HasMore bool      `json:"hasMore"`
 }
 
 // Lookup carries everything we have on the ROM. CRC > MD5 > SHA1 > name.
@@ -95,6 +137,133 @@ func (s *Store) Ready() bool {
 
 // Path returns the configured SQLite path (whether or not it exists).
 func (s *Store) Path() string { return s.path }
+
+// ListReleases returns a paginated slice of catalogue entries, joined
+// with ROMs + SYSTEMS so each Release carries its system info up front.
+// We group by releaseID so duplicate ROM dumps don't show as separate
+// catalog cards.
+func (s *Store) ListReleases(ctx context.Context, q CatalogQuery) (*CatalogPage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return nil, ErrNotReady
+	}
+	page := q.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := q.PageSize
+	if pageSize <= 0 || pageSize > 200 {
+		pageSize = 60
+	}
+
+	// Build WHERE clause + args.
+	var where []string
+	var args []any
+	if len(q.SystemIDs) > 0 {
+		ph := make([]string, len(q.SystemIDs))
+		for i, sid := range q.SystemIDs {
+			ph[i] = "?"
+			args = append(args, sid)
+		}
+		where = append(where, "Ro.systemID IN ("+strings.Join(ph, ",")+")")
+	}
+	if t := strings.TrimSpace(q.Query); t != "" {
+		where = append(where, "R.releaseTitleName LIKE ?")
+		args = append(args, "%"+t+"%")
+	}
+	whereSQL := ""
+	if len(where) > 0 {
+		whereSQL = "WHERE " + strings.Join(where, " AND ")
+	}
+
+	// Total count (same filter, no LIMIT) — small DB, fast.
+	var total int
+	countSQL := `
+		SELECT COUNT(DISTINCT R.releaseID)
+		FROM RELEASES R
+		JOIN ROMs Ro ON Ro.romID = R.romID
+		` + whereSQL
+	if err := s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+		return nil, err
+	}
+
+	// Page query.
+	pageSQL := `
+		SELECT R.releaseID, R.releaseTitleName, COALESCE(R.releaseCoverFront, ''),
+		       Ro.systemID, COALESCE(S.systemShortName, ''),
+		       COALESCE(Reg.regionName, '')
+		FROM RELEASES R
+		JOIN ROMs Ro ON Ro.romID = R.romID
+		LEFT JOIN SYSTEMS S ON S.systemID = Ro.systemID
+		LEFT JOIN REGIONS Reg ON Reg.regionID = R.regionLocalizedID
+		` + whereSQL + `
+		GROUP BY R.releaseID
+		ORDER BY R.releaseTitleName ASC
+		LIMIT ? OFFSET ?
+	`
+	args = append(args, pageSize, (page-1)*pageSize)
+	rows, err := s.db.QueryContext(ctx, pageSQL, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []Release
+	for rows.Next() {
+		var r Release
+		if err := rows.Scan(&r.ReleaseID, &r.Title, &r.CoverURL, &r.OpenVGDBSystemID, &r.SystemShortName, &r.Region); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return &CatalogPage{
+		Items:   items,
+		Total:   total,
+		Page:    page,
+		HasMore: page*pageSize < total,
+	}, nil
+}
+
+// GetRelease returns the full detail for one release id.
+func (s *Store) GetRelease(ctx context.Context, releaseID int) (*ReleaseDetail, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return nil, ErrNotReady
+	}
+	row := s.db.QueryRowContext(ctx, `
+		SELECT R.releaseID, R.releaseTitleName,
+		       COALESCE(R.releaseCoverFront, ''), COALESCE(R.releaseCoverBack, ''),
+		       COALESCE(R.releaseDescription, ''), COALESCE(R.releaseGenre, ''),
+		       COALESCE(R.releaseDeveloper, ''), COALESCE(R.releasePublisher, ''),
+		       COALESCE(R.releaseDate, ''),
+		       Ro.systemID, COALESCE(S.systemShortName, ''),
+		       COALESCE(Reg.regionName, '')
+		FROM RELEASES R
+		JOIN ROMs Ro ON Ro.romID = R.romID
+		LEFT JOIN SYSTEMS S ON S.systemID = Ro.systemID
+		LEFT JOIN REGIONS Reg ON Reg.regionID = R.regionLocalizedID
+		WHERE R.releaseID = ?
+		LIMIT 1
+	`, releaseID)
+	var d ReleaseDetail
+	if err := row.Scan(
+		&d.ReleaseID, &d.Title, &d.CoverURL, &d.BackCoverURL,
+		&d.Description, &d.Genre, &d.Developer, &d.Publisher, &d.ReleaseDate,
+		&d.OpenVGDBSystemID, &d.SystemShortName, &d.Region,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &d, nil
+}
 
 // Counts returns (roms, releases) row counts for the Settings UI. Zero
 // values when the store isn't ready.

@@ -1,11 +1,12 @@
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom"
 
+import { CatalogueDetailPage } from "@/components/CatalogueDetail"
+import { CataloguePage } from "@/components/Catalogue"
 import { DownloadsPage } from "@/components/DownloadsPage"
 import { GameDetailPage } from "@/components/GameDetail"
 import { LibraryPage } from "@/components/Library"
 import { SettingsPage } from "@/components/SettingsPage"
 import { Sidebar } from "@/components/Sidebar"
-import { SourcesPage } from "@/components/Sources"
 import { Splash } from "@/components/ui"
 import { useStatus } from "@/lib/hooks"
 
@@ -16,8 +17,9 @@ export function App() {
         <Route element={<AppShell />}>
           <Route path="/" element={<LibraryPage />} />
           <Route path="/game/:id" element={<GameDetailPage />} />
+          <Route path="/catalogue" element={<CataloguePage />} />
+          <Route path="/catalogue/:id" element={<CatalogueDetailPage />} />
           <Route path="/downloads" element={<DownloadsPage />} />
-          <Route path="/sources" element={<SourcesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

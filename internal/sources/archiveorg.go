@@ -18,13 +18,13 @@ const (
 	iaSearchURL   = "https://archive.org/advancedsearch.php"
 	iaMetadataURL = "https://archive.org/metadata"
 	iaDownloadURL = "https://archive.org/download"
-	iaPageSize    = 30
+	iaSearchLimit = 12 // candidates surfaced per game per source
 )
 
 // archiveOrgSubject is the value we put in `subject:"…"` Lucene queries
-// for each of our platform IDs. Picked by sampling search counts (see
-// the scripts/scratch notes; "nes" beats "Nintendo Entertainment System"
-// 4-to-1 because Archive.org users tag with the short name).
+// for each of our platform IDs. Picked by sampling search counts —
+// IA users tend to tag with the short name (`nes` beats `Nintendo
+// Entertainment System` 4-to-1).
 var archiveOrgSubject = map[string]string{
 	"nes":          "nes",
 	"snes":         "snes",
@@ -59,15 +59,13 @@ type ArchiveOrg struct {
 }
 
 func NewArchiveOrg() *ArchiveOrg {
-	return &ArchiveOrg{
-		http: &http.Client{Timeout: 15 * time.Second},
-	}
+	return &ArchiveOrg{http: &http.Client{Timeout: 15 * time.Second}}
 }
 
 func (a *ArchiveOrg) ID() string   { return "archiveorg" }
 func (a *ArchiveOrg) Name() string { return "Internet Archive" }
 func (a *ArchiveOrg) Description() string {
-	return "Recherche dans archive.org — collections legales (homebrew, public domain, abandonware)."
+	return "Recherche dans archive.org — collections legales (homebrew, public domain, abandonware autorisé)."
 }
 func (a *ArchiveOrg) Downloadable() bool { return true }
 func (a *ArchiveOrg) SupportedPlatforms() []string {
@@ -78,30 +76,30 @@ func (a *ArchiveOrg) SupportedPlatforms() []string {
 	return out
 }
 
-// Browse fires the advancedsearch.php Lucene endpoint. We always
-// constrain to mediatype:software and tack on a platform subject when
-// one is provided; an optional free-text query is AND-merged.
-func (a *ArchiveOrg) Browse(ctx context.Context, opts BrowseOptions) (*Page, error) {
-	page := opts.Page
-	if page < 1 {
-		page = 1
+// Search asks IA's advancedsearch.php for items matching the title for
+// the given platform. We always include `mediatype:software` and the
+// platform subject; the title goes into a relevance-ranked phrase
+// search. Empty title → nil result (the caller should never be asking
+// "what does IA have on platform X" without a game in mind).
+func (a *ArchiveOrg) Search(ctx context.Context, title, platformID string) ([]ROM, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return nil, nil
+	}
+	subj, ok := archiveOrgSubject[platformID]
+	if !ok {
+		// Unsupported platform → don't search (would return junk).
+		return nil, nil
 	}
 
-	q := []string{"mediatype:software"}
-	if subj, ok := archiveOrgSubject[opts.PlatformID]; ok {
-		q = append(q, fmt.Sprintf("subject:%q", subj))
-	}
-	if t := strings.TrimSpace(opts.Query); t != "" {
-		// Quoted to keep multi-word searches intact.
-		q = append(q, fmt.Sprintf("title:%q", t))
-	}
+	cleanTitle := stripRegionTags(title)
+	q := fmt.Sprintf(`mediatype:software AND subject:%q AND title:%q`, subj, cleanTitle)
 
 	u, _ := url.Parse(iaSearchURL)
 	qs := u.Query()
-	qs.Set("q", strings.Join(q, " AND "))
+	qs.Set("q", q)
 	qs.Set("output", "json")
-	qs.Set("rows", fmt.Sprintf("%d", iaPageSize))
-	qs.Set("page", fmt.Sprintf("%d", page))
+	qs.Set("rows", fmt.Sprintf("%d", iaSearchLimit))
 	qs.Set("sort[]", "downloads desc")
 	for _, fl := range []string{"identifier", "title", "description", "item_size"} {
 		qs.Add("fl[]", fl)
@@ -114,8 +112,7 @@ func (a *ArchiveOrg) Browse(ctx context.Context, opts BrowseOptions) (*Page, err
 	}
 	var parsed struct {
 		Response struct {
-			NumFound int `json:"numFound"`
-			Docs     []struct {
+			Docs []struct {
 				Identifier  string `json:"identifier"`
 				Title       any    `json:"title"`
 				Description any    `json:"description"`
@@ -133,7 +130,7 @@ func (a *ArchiveOrg) Browse(ctx context.Context, opts BrowseOptions) (*Page, err
 			SourceID:     a.ID(),
 			ID:           d.Identifier,
 			Title:        firstString(d.Title),
-			PlatformID:   opts.PlatformID,
+			PlatformID:   platformID,
 			Description:  truncate(firstString(d.Description), 280),
 			CoverURL:     fmt.Sprintf("https://archive.org/services/img/%s", d.Identifier),
 			SizeBytes:    asInt64(d.ItemSize),
@@ -141,17 +138,11 @@ func (a *ArchiveOrg) Browse(ctx context.Context, opts BrowseOptions) (*Page, err
 			ExternalURL:  fmt.Sprintf("https://archive.org/details/%s", d.Identifier),
 		})
 	}
-
-	consumed := page * iaPageSize
-	return &Page{
-		Items:    items,
-		HasMore:  consumed < parsed.Response.NumFound,
-		NextPage: page + 1,
-	}, nil
+	return items, nil
 }
 
 // Resolve looks up an item's metadata, picks the first file whose
-// extension matches a known ROM extension (or .zip as a fallback), and
+// extension matches a known ROM extension (or .zip/.7z fallback), and
 // returns its direct archive.org/download URL.
 func (a *ArchiveOrg) Resolve(ctx context.Context, romID string) (string, error) {
 	if romID == "" {
@@ -170,8 +161,6 @@ func (a *ArchiveOrg) Resolve(ctx context.Context, romID string) (string, error) 
 		return "", err
 	}
 
-	// Prefer known ROM extensions; fall back to .zip / .7z (compressed
-	// dump that the user's library can extract — RetroArch handles zip).
 	var rom, archive string
 	for _, f := range parsed.Files {
 		if platforms.IsROMExtension(f.Name) {
@@ -210,8 +199,7 @@ func (a *ArchiveOrg) get(ctx context.Context, u string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(res.Body, 4<<20))
 }
 
-// IA's response fields are typed as []string | string depending on the
-// document. firstString flattens either shape to one value.
+// IA's response fields are []string | string depending on the document.
 func firstString(v any) string {
 	switch x := v.(type) {
 	case string:
@@ -244,4 +232,22 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max-1] + "…"
+}
+
+// stripRegionTags removes the trailing "(USA)" / "(Europe) (Rev 1)" etc.
+// tags that OpenVGDB titles carry — IA titles usually don't include them
+// so leaving them in tanks the relevance score.
+func stripRegionTags(s string) string {
+	for {
+		i := strings.LastIndexAny(s, "([")
+		if i <= 0 {
+			break
+		}
+		// Only strip if the bracket is near the end (room for a short tag).
+		if len(s)-i > 30 {
+			break
+		}
+		s = strings.TrimSpace(s[:i])
+	}
+	return s
 }

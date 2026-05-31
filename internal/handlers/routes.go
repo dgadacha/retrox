@@ -83,9 +83,14 @@ func RegisterRoutes(e *echo.Echo, h *Handler) {
 
 	v1.POST("/metadata/openvgdb/download", h.HandleDownloadOpenVGDB)
 
+	cat := v1.Group("/catalog")
+	cat.GET("", h.HandleCatalogList)
+	cat.GET("/:id", h.HandleCatalogGet)
+	cat.GET("/:id/cover", h.HandleCatalogCover)
+	cat.GET("/:id/sources", h.HandleCatalogSources)
+
 	src := v1.Group("/sources")
 	src.GET("", h.HandleListSources)
-	src.GET("/:id/browse", h.HandleBrowseSource)
 	src.POST("/:id/download", h.HandleDownloadFromSource)
 }
 

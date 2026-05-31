@@ -1,4 +1,7 @@
 import type {
+  CatalogPage,
+  CatalogReleaseDetail,
+  CatalogSourceGroup,
   Download,
   EmulatorView,
   Favorite,
@@ -10,7 +13,6 @@ import type {
   ScanProgress,
   Settings,
   SourceInfo,
-  SourcePage,
   Status,
 } from "@/lib/types"
 
@@ -86,19 +88,26 @@ export const api = {
     req<OpenVGDBDownloadResult>("/metadata/openvgdb/download", { method: "POST" }),
 
   sources: () => req<SourceInfo[]>("/sources"),
-  sourceBrowse: (id: string, params: { platform?: string; q?: string; page?: number }) => {
-    const qs = new URLSearchParams()
-    if (params.platform) qs.set("platform", params.platform)
-    if (params.q) qs.set("q", params.q)
-    if (params.page && params.page > 1) qs.set("page", String(params.page))
-    const suffix = qs.toString() ? `?${qs}` : ""
-    return req<SourcePage>(`/sources/${encodeURIComponent(id)}/browse${suffix}`)
-  },
   sourceDownload: (id: string, input: { romId: string; platformId: string; title: string }) =>
     req<Download>(`/sources/${encodeURIComponent(id)}/download`, {
       method: "POST",
       body: JSON.stringify(input),
     }),
+
+  catalog: (params: { platform?: string; q?: string; page?: number }) => {
+    const qs = new URLSearchParams()
+    if (params.platform) qs.set("platform", params.platform)
+    if (params.q) qs.set("q", params.q)
+    if (params.page && params.page > 1) qs.set("page", String(params.page))
+    const suffix = qs.toString() ? `?${qs}` : ""
+    return req<CatalogPage>(`/catalog${suffix}`)
+  },
+  catalogGet: (id: number) => req<CatalogReleaseDetail>(`/catalog/${id}`),
+  catalogSources: (id: number) => req<CatalogSourceGroup[]>(`/catalog/${id}/sources`),
+}
+
+export function catalogCover(releaseId: number): string {
+  return `${BASE}/catalog/${releaseId}/cover`
 }
 
 export type ImageKind = "cover" | "screenshot"
