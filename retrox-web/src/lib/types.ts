@@ -161,6 +161,14 @@ export interface CatalogRelease {
   systemShortName?: string
   region?: string
   platformId: string
+  variantCount?: number
+}
+
+export interface CatalogPlatform {
+  id: string
+  name: string
+  openvgdbId: number
+  count: number
 }
 
 export interface CatalogReleaseDetail extends CatalogRelease {

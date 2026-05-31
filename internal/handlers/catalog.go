@@ -17,6 +17,43 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// HandleCatalogPlatforms returns the platform-picker payload: one entry
+// per RETROX-supported platform that has at least one OpenVGDB release,
+// with the deduped game count for tile badges.
+func (h *Handler) HandleCatalogPlatforms(c echo.Context) error {
+	if h.App.OpenVGDB == nil || !h.App.OpenVGDB.Ready() {
+		return RespondErr(c, http.StatusServiceUnavailable, "OpenVGDB indisponible")
+	}
+	var ids []int
+	for _, p := range platforms.All() {
+		if p.OpenVGDBID > 0 {
+			ids = append(ids, p.OpenVGDBID)
+		}
+	}
+	counts, err := h.App.OpenVGDB.CountReleasesByPlatform(c.Request().Context(), ids)
+	if err != nil {
+		return RespondErr(c, http.StatusInternalServerError, err.Error())
+	}
+	type tile struct {
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		OpenVGDBID int    `json:"openvgdbId"`
+		Count      int    `json:"count"`
+	}
+	out := make([]tile, 0, len(ids))
+	for _, p := range platforms.All() {
+		if p.OpenVGDBID == 0 {
+			continue
+		}
+		n := counts[p.OpenVGDBID]
+		if n == 0 {
+			continue
+		}
+		out = append(out, tile{ID: p.ID, Name: p.Name, OpenVGDBID: p.OpenVGDBID, Count: n})
+	}
+	return RespondOK(c, out)
+}
+
 // HandleCatalogList returns a paginated slice of OpenVGDB releases.
 // Filter by `platform` (our internal id, e.g. "snes") and free-text
 // `q`. Falls back to "all RETROX-supported platforms" when no platform

@@ -85,6 +85,7 @@ func RegisterRoutes(e *echo.Echo, h *Handler) {
 
 	cat := v1.Group("/catalog")
 	cat.GET("", h.HandleCatalogList)
+	cat.GET("/platforms", h.HandleCatalogPlatforms)
 	cat.GET("/:id", h.HandleCatalogGet)
 	cat.GET("/:id/cover", h.HandleCatalogCover)
 	cat.GET("/:id/sources", h.HandleCatalogSources)

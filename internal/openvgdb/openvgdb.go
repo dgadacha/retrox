@@ -49,9 +49,10 @@ type GameInfo struct {
 	BackCoverURL string
 }
 
-// Release is one entry in OpenVGDB's catalogue (one game/region/dump
-// combo). The catalog page browses these directly — same fields as
-// GameInfo plus the IDs we need to navigate.
+// Release is one entry in OpenVGDB's catalogue. ListReleases dedupes
+// regional variants of the same game (USA/Europe/Rev N rows collapse
+// into a single canonical card) and surfaces VariantCount so the UI
+// can hint how many other versions exist on the detail page.
 type Release struct {
 	ReleaseID        int    `json:"releaseId"`
 	Title            string `json:"title"`
@@ -59,6 +60,7 @@ type Release struct {
 	OpenVGDBSystemID int    `json:"openvgdbSystemId"`
 	SystemShortName  string `json:"systemShortName,omitempty"`
 	Region           string `json:"region,omitempty"`
+	VariantCount     int    `json:"variantCount,omitempty"`
 }
 
 // ReleaseDetail extends Release with all the descriptive fields the
@@ -138,10 +140,11 @@ func (s *Store) Ready() bool {
 // Path returns the configured SQLite path (whether or not it exists).
 func (s *Store) Path() string { return s.path }
 
-// ListReleases returns a paginated slice of catalogue entries, joined
-// with ROMs + SYSTEMS so each Release carries its system info up front.
-// We group by releaseID so duplicate ROM dumps don't show as separate
-// catalog cards.
+// ListReleases returns a paginated slice of catalogue entries. Regional
+// variants (USA/Europe/Rev N) collapse into a single canonical card:
+// we group by (lowercased title-prefix-before-first-parenthesis,
+// systemID), then surface the release with a cover when possible —
+// otherwise the lowest releaseID — as the representative.
 func (s *Store) ListReleases(ctx context.Context, q CatalogQuery) (*CatalogPage, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -157,7 +160,6 @@ func (s *Store) ListReleases(ctx context.Context, q CatalogQuery) (*CatalogPage,
 		pageSize = 60
 	}
 
-	// Build WHERE clause + args.
 	var where []string
 	var args []any
 	if len(q.SystemIDs) > 0 {
@@ -177,28 +179,51 @@ func (s *Store) ListReleases(ctx context.Context, q CatalogQuery) (*CatalogPage,
 		whereSQL = "WHERE " + strings.Join(where, " AND ")
 	}
 
-	// Total count (same filter, no LIMIT) — small DB, fast.
+	// SQLite-friendly "title before first parenthesis" — instr returns
+	// 0 if no match so the CASE falls back to the whole title.
+	canonical := `LOWER(CASE WHEN instr(R.releaseTitleName, ' (') > 0
+		THEN substr(R.releaseTitleName, 1, instr(R.releaseTitleName, ' (')-1)
+		ELSE R.releaseTitleName END)`
+
+	// dedup CTE: one row per (canonical, systemID), picking the
+	// releaseID with the best cover when several variants exist.
+	dedupCTE := `
+		WITH normalized AS (
+			SELECT R.releaseID, R.releaseCoverFront, Ro.systemID,
+			       ` + canonical + ` AS canonical
+			FROM RELEASES R
+			JOIN ROMs Ro ON Ro.romID = R.romID
+			` + whereSQL + `
+		),
+		dedup AS (
+			SELECT
+				COALESCE(
+					MIN(CASE WHEN releaseCoverFront IS NOT NULL AND releaseCoverFront <> ''
+					    THEN releaseID END),
+					MIN(releaseID)
+				) AS releaseID,
+				COUNT(*) AS variants
+			FROM normalized
+			GROUP BY canonical, systemID
+		)`
+
+	// Total count → number of dedup groups.
 	var total int
-	countSQL := `
-		SELECT COUNT(DISTINCT R.releaseID)
-		FROM RELEASES R
-		JOIN ROMs Ro ON Ro.romID = R.romID
-		` + whereSQL
+	countSQL := dedupCTE + ` SELECT COUNT(*) FROM dedup`
 	if err := s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
 		return nil, err
 	}
 
-	// Page query.
-	pageSQL := `
+	// Page query joins back to grab the canonical row's full info.
+	pageSQL := dedupCTE + `
 		SELECT R.releaseID, R.releaseTitleName, COALESCE(R.releaseCoverFront, ''),
 		       Ro.systemID, COALESCE(S.systemShortName, ''),
-		       COALESCE(Reg.regionName, '')
-		FROM RELEASES R
+		       COALESCE(Reg.regionName, ''), d.variants
+		FROM dedup d
+		JOIN RELEASES R ON R.releaseID = d.releaseID
 		JOIN ROMs Ro ON Ro.romID = R.romID
 		LEFT JOIN SYSTEMS S ON S.systemID = Ro.systemID
 		LEFT JOIN REGIONS Reg ON Reg.regionID = R.regionLocalizedID
-		` + whereSQL + `
-		GROUP BY R.releaseID
 		ORDER BY R.releaseTitleName ASC
 		LIMIT ? OFFSET ?
 	`
@@ -212,7 +237,8 @@ func (s *Store) ListReleases(ctx context.Context, q CatalogQuery) (*CatalogPage,
 	var items []Release
 	for rows.Next() {
 		var r Release
-		if err := rows.Scan(&r.ReleaseID, &r.Title, &r.CoverURL, &r.OpenVGDBSystemID, &r.SystemShortName, &r.Region); err != nil {
+		if err := rows.Scan(&r.ReleaseID, &r.Title, &r.CoverURL,
+			&r.OpenVGDBSystemID, &r.SystemShortName, &r.Region, &r.VariantCount); err != nil {
 			return nil, err
 		}
 		items = append(items, r)
@@ -227,6 +253,53 @@ func (s *Store) ListReleases(ctx context.Context, q CatalogQuery) (*CatalogPage,
 		Page:    page,
 		HasMore: page*pageSize < total,
 	}, nil
+}
+
+// CountReleasesByPlatform returns the number of canonical (deduped) games
+// per OpenVGDB systemID. Used to badge the platform-picker tiles.
+func (s *Store) CountReleasesByPlatform(ctx context.Context, systemIDs []int) (map[int]int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return nil, ErrNotReady
+	}
+	if len(systemIDs) == 0 {
+		return map[int]int{}, nil
+	}
+	ph := make([]string, len(systemIDs))
+	args := make([]any, len(systemIDs))
+	for i, sid := range systemIDs {
+		ph[i] = "?"
+		args[i] = sid
+	}
+	canonical := `LOWER(CASE WHEN instr(R.releaseTitleName, ' (') > 0
+		THEN substr(R.releaseTitleName, 1, instr(R.releaseTitleName, ' (')-1)
+		ELSE R.releaseTitleName END)`
+	q := `
+		WITH normalized AS (
+			SELECT Ro.systemID, ` + canonical + ` AS canonical
+			FROM RELEASES R
+			JOIN ROMs Ro ON Ro.romID = R.romID
+			WHERE Ro.systemID IN (` + strings.Join(ph, ",") + `)
+		)
+		SELECT systemID, COUNT(*) FROM (
+			SELECT systemID, canonical FROM normalized GROUP BY canonical, systemID
+		) GROUP BY systemID
+	`
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[int]int, len(systemIDs))
+	for rows.Next() {
+		var sid, n int
+		if err := rows.Scan(&sid, &n); err != nil {
+			return nil, err
+		}
+		out[sid] = n
+	}
+	return out, rows.Err()
 }
 
 // GetRelease returns the full detail for one release id.

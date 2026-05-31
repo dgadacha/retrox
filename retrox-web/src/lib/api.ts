@@ -1,5 +1,6 @@
 import type {
   CatalogPage,
+  CatalogPlatform,
   CatalogReleaseDetail,
   CatalogSourceGroup,
   Download,
@@ -102,6 +103,7 @@ export const api = {
     const suffix = qs.toString() ? `?${qs}` : ""
     return req<CatalogPage>(`/catalog${suffix}`)
   },
+  catalogPlatforms: () => req<CatalogPlatform[]>("/catalog/platforms"),
   catalogGet: (id: number) => req<CatalogReleaseDetail>(`/catalog/${id}`),
   catalogSources: (id: number) => req<CatalogSourceGroup[]>(`/catalog/${id}/sources`),
 }
