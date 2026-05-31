@@ -299,7 +299,7 @@ function CatalogueCard({ r }: { r: CatalogRelease }) {
 
   return (
     <Link
-      to={`/catalogue/${r.releaseId}`}
+      to={`/catalogue/${encodeURIComponent(r.releaseId)}`}
       title={r.title}
       className="group relative aspect-[3/4] overflow-hidden rounded-lg bg-ink-800 ring-1 ring-inset ring-white/5 outline-none transition duration-200 hover:-translate-y-1 hover:ring-accent-500/60 hover:shadow-[0_10px_30px_-10px_rgba(139,92,246,0.45)] focus-visible:ring-accent-500"
     >

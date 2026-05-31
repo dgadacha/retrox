@@ -30,6 +30,7 @@ func (h *Handler) HandleStatus(c echo.Context) error {
 			"gamesScraped":      scraped,
 			"scanning":          scanner.Running(),
 			"defaultProfileUid": h.App.DefaultProfileUID(),
+			"igdbConfigured":    h.App.IGDB != nil && h.App.IGDB.Configured(),
 		},
 	})
 }

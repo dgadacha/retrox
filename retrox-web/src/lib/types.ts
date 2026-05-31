@@ -94,6 +94,7 @@ export interface Status {
   openvgdbRoms: number
   openvgdbReleases: number
   openvgdbPath: string
+  igdbConfigured: boolean
   datadir: string
   romDirs: string[]
   games: number
@@ -117,6 +118,8 @@ export interface Settings {
   retroarchBin: string
   retroarchCores: string
   openvgdbPath: string
+  igdbClientId: string
+  igdbClientSecretSet: boolean
 }
 
 export interface PlayResolved {
@@ -154,20 +157,20 @@ export interface SourceROM {
 }
 
 export interface CatalogRelease {
-  releaseId: number
+  releaseId: string // composite "<source>:<id>" — "ovgdb:42" or "igdb:1942"
   title: string
   coverUrl?: string
-  openvgdbSystemId: number
   systemShortName?: string
   region?: string
   platformId: string
   variantCount?: number
+  source: string // "ovgdb" | "igdb"
 }
 
 export interface CatalogPlatform {
   id: string
   name: string
-  openvgdbId: number
+  source: string // "ovgdb" | "igdb"
   count: number
 }
 

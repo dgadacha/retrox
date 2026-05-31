@@ -42,6 +42,13 @@ type Config struct {
 		// <datadir>/openvgdb.sqlite; override with RETROX_OPENVGDB_PATH
 		// if you keep the DB on a shared volume.
 		Path string
+
+		// IGDBClientID + IGDBClientSecret are the Twitch developer
+		// credentials used to authenticate against the IGDB REST API.
+		// Both empty → IGDB is "not configured" and the catalogue
+		// falls back to OpenVGDB / libretro-thumbnails only.
+		IGDBClientID     string
+		IGDBClientSecret string
 	}
 	Library struct {
 		// Colon-separated list of root folders to scan for ROMs. Each root
@@ -95,6 +102,11 @@ func loadConfig() (*Config, error) {
 		os.Getenv("RETROX_OPENVGDB_PATH"),
 		filepath.Join(cfg.Data.Dir, "openvgdb.sqlite"),
 	)
+
+	// IGDB credentials — env-var seeded, overridable from the settings
+	// UI for first-time setup. Both empty = IGDB disabled.
+	cfg.Metadata.IGDBClientID = os.Getenv("RETROX_IGDB_CLIENT_ID")
+	cfg.Metadata.IGDBClientSecret = os.Getenv("RETROX_IGDB_CLIENT_SECRET")
 
 	// Library roots — RETROX_ROM_DIRS is a ':'-separated list. Default
 	// to <binaryDir>/roms so dropping a ROM in the project folder

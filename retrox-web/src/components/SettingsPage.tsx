@@ -19,6 +19,7 @@ export function SettingsPage() {
 
       <div className="mx-auto w-full max-w-4xl space-y-6 px-6 py-8 lg:px-10">
         <OpenVGDBSection />
+        <IGDBSection />
         <ServerConfigForm />
         <ScanSection />
         <EmulatorEditor />
@@ -27,7 +28,7 @@ export function SettingsPage() {
   )
 }
 
-function Card({ title, desc, children }: { title: string; desc?: string; children: ReactNode }) {
+function Card({ title, desc, children }: { title: string; desc?: ReactNode; children: ReactNode }) {
   return (
     <section className="overflow-hidden rounded-xl border border-ink-700 bg-ink-900/60">
       <header className="border-b border-ink-700 px-5 py-4">
@@ -108,6 +109,105 @@ function OpenVGDBSection() {
       {downloadM.isError && (
         <p className="text-sm text-red-400">{(downloadM.error as Error).message}</p>
       )}
+    </Card>
+  )
+}
+
+function IGDBSection() {
+  const settingsQ = useSettings()
+  const statusQ = useStatus()
+  const qc = useQueryClient()
+
+  const [clientId, setClientId] = useState("")
+  const [clientSecret, setClientSecret] = useState("")
+  const s = settingsQ.data
+
+  useEffect(() => {
+    if (s) setClientId(s.igdbClientId ?? "")
+  }, [s])
+
+  const saveM = useMutation({
+    mutationFn: () => api.setIGDBCredentials({ clientId, clientSecret }),
+    onSuccess: () => {
+      setClientSecret("")
+      qc.invalidateQueries({ queryKey: qk.settings })
+      qc.invalidateQueries({ queryKey: qk.status })
+      qc.invalidateQueries({ queryKey: ["catalog-platforms"] })
+    },
+  })
+
+  const configured = !!statusQ.data?.igdbConfigured
+
+  return (
+    <Card
+      title="Source complémentaire — IGDB (Twitch)"
+      desc={
+        <>
+          Pour les plateformes qu'OpenVGDB ne couvre pas (PS2, Dreamcast, Wii, Neo Geo, …).
+          Crée une app sur{" "}
+          <a
+            href="https://dev.twitch.tv/console/apps/create"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="text-accent-400 hover:underline"
+          >
+            dev.twitch.tv/console/apps
+          </a>
+          {" "}
+          (5 min, gratuit), copie le Client ID et génère un Client Secret.
+        </>
+      }
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        {configured ? (
+          <Badge tone="success">Connecté</Badge>
+        ) : (
+          <Badge tone="warn">Non configuré</Badge>
+        )}
+      </div>
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          saveM.mutate()
+        }}
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <Label>Client ID</Label>
+            <input
+              className={inputClass}
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            />
+          </div>
+          <div>
+            <Label>Client Secret</Label>
+            <input
+              type="password"
+              className={inputClass}
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+              placeholder={s?.igdbClientSecretSet ? "•••••• (défini)" : "non défini"}
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <Button type="submit" variant="primary" disabled={saveM.isPending}>
+            {saveM.isPending ? <Spinner className="h-4 w-4" /> : "Vérifier + enregistrer"}
+          </Button>
+          {saveM.isSuccess && (
+            <span className="inline-flex items-center gap-1.5 text-sm text-emerald-400">
+              <Check className="h-4 w-4" strokeWidth={2.5} />
+              IGDB connecté
+            </span>
+          )}
+          {saveM.isError && (
+            <span className="text-sm text-red-400">{(saveM.error as Error).message}</span>
+          )}
+        </div>
+      </form>
     </Card>
   )
 }

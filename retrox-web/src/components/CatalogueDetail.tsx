@@ -17,18 +17,18 @@ import type { CatalogReleaseDetail, CatalogSourceGroup, SourceROM } from "@/lib/
 export function CatalogueDetailPage() {
   const { id: idParam } = useParams()
   const navigate = useNavigate()
-  const id = Number(idParam)
+  const id = idParam ?? ""
 
   const detailQ = useQuery({
     queryKey: ["catalog-detail", id],
     queryFn: () => api.catalogGet(id),
-    enabled: id > 0,
+    enabled: id !== "",
   })
   const [showSources, setShowSources] = useState(false)
   const sourcesQ = useQuery({
     queryKey: ["catalog-sources", id],
     queryFn: () => api.catalogSources(id),
-    enabled: showSources && id > 0,
+    enabled: showSources && id !== "",
   })
 
   if (detailQ.isLoading) {
@@ -200,7 +200,7 @@ function SourcesPanel({
   isError,
   error,
 }: {
-  releaseId: number
+  releaseId: string
   platformId: string
   title: string
   groups?: CatalogSourceGroup[]
@@ -257,7 +257,7 @@ function SourcesPanel({
   )
 }
 
-function SourceGroup({ group, releaseId }: { group: CatalogSourceGroup; releaseId: number }) {
+function SourceGroup({ group, releaseId }: { group: CatalogSourceGroup; releaseId: string }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
@@ -281,7 +281,7 @@ function SourceGroup({ group, releaseId }: { group: CatalogSourceGroup; releaseI
   )
 }
 
-function SourceCandidate({ rom, releaseId }: { rom: SourceROM; releaseId: number }) {
+function SourceCandidate({ rom, releaseId }: { rom: SourceROM; releaseId: string }) {
   const qc = useQueryClient()
   const downloadM = useMutation({
     mutationFn: () =>

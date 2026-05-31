@@ -11,6 +11,7 @@ import (
 	"retrox/internal/database/models"
 	"retrox/internal/download"
 	"retrox/internal/emulator"
+	"retrox/internal/igdb"
 	"retrox/internal/libretrothumbs"
 	"retrox/internal/metadata"
 	"retrox/internal/openvgdb"
@@ -25,6 +26,7 @@ type App struct {
 	Config    *Config
 	Database  *db.Database
 	OpenVGDB  *openvgdb.Store
+	IGDB      *igdb.Client
 	Thumbs    *libretrothumbs.Client
 	Metadata  *metadata.Provider
 	Downloads *download.Manager
@@ -41,10 +43,12 @@ type App struct {
 // Setting keys — the admin UI overrides the env-var defaults by writing
 // these into the settings table. Env vars remain the boot fallback.
 const (
-	SettingROMDirs        = "rom_dirs" // ':'-separated
-	SettingRetroArchBin   = "retroarch_bin"
-	SettingRetroArchCores = "retroarch_cores"
-	SettingOpenVGDBPath   = "openvgdb_path"
+	SettingROMDirs           = "rom_dirs" // ':'-separated
+	SettingRetroArchBin      = "retroarch_bin"
+	SettingRetroArchCores    = "retroarch_cores"
+	SettingOpenVGDBPath      = "openvgdb_path"
+	SettingIGDBClientID      = "igdb_client_id"
+	SettingIGDBClientSecret  = "igdb_client_secret"
 )
 
 func New() (*App, error) {
@@ -75,11 +79,16 @@ func New() (*App, error) {
 	}
 
 	thumbs := libretrothumbs.NewClient()
+	igdbClient := igdb.New()
+	if cfg.Metadata.IGDBClientID != "" && cfg.Metadata.IGDBClientSecret != "" {
+		igdbClient.SetCredentials(cfg.Metadata.IGDBClientID, cfg.Metadata.IGDBClientSecret)
+	}
 
 	app := &App{
 		Config:   cfg,
 		Database: database,
 		OpenVGDB: store,
+		IGDB:     igdbClient,
 		Thumbs:   thumbs,
 		Metadata: metadata.New(store, thumbs),
 		Sources: []sources.Source{
@@ -183,6 +192,21 @@ func (a *App) ApplyServerConfig(romDirs []string, raBin, raCores string) error {
 	return nil
 }
 
+// ApplyIGDBCredentials persists + hot-swaps the IGDB OAuth keys.
+// Empty strings disable IGDB until the user pastes new ones.
+func (a *App) ApplyIGDBCredentials(clientID, clientSecret string) error {
+	if err := a.Database.SetSetting(SettingIGDBClientID, clientID); err != nil {
+		return err
+	}
+	if err := a.Database.SetSetting(SettingIGDBClientSecret, clientSecret); err != nil {
+		return err
+	}
+	a.Config.Metadata.IGDBClientID = clientID
+	a.Config.Metadata.IGDBClientSecret = clientSecret
+	a.IGDB.SetCredentials(clientID, clientSecret)
+	return nil
+}
+
 // DownloadOpenVGDB fetches the upstream SQLite zip, extracts it, and
 // re-opens the store. Triggered from the settings UI; safe to call
 // repeatedly to refresh.
@@ -222,7 +246,7 @@ func (a *App) ensureDefaultProfile() error {
 func overlaySettingsOnto(database *db.Database, cfg *Config) {
 	rows, err := database.GetSettings([]string{
 		SettingROMDirs, SettingRetroArchBin, SettingRetroArchCores,
-		SettingOpenVGDBPath,
+		SettingOpenVGDBPath, SettingIGDBClientID, SettingIGDBClientSecret,
 	})
 	if err != nil {
 		return
@@ -244,5 +268,11 @@ func overlaySettingsOnto(database *db.Database, cfg *Config) {
 	}
 	if v := rows[SettingOpenVGDBPath]; v != "" {
 		cfg.Metadata.Path = v
+	}
+	if v := rows[SettingIGDBClientID]; v != "" {
+		cfg.Metadata.IGDBClientID = v
+	}
+	if v := rows[SettingIGDBClientSecret]; v != "" {
+		cfg.Metadata.IGDBClientSecret = v
 	}
 }

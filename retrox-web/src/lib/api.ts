@@ -104,12 +104,19 @@ export const api = {
     return req<CatalogPage>(`/catalog${suffix}`)
   },
   catalogPlatforms: () => req<CatalogPlatform[]>("/catalog/platforms"),
-  catalogGet: (id: number) => req<CatalogReleaseDetail>(`/catalog/${id}`),
-  catalogSources: (id: number) => req<CatalogSourceGroup[]>(`/catalog/${id}/sources`),
+  catalogGet: (id: string) => req<CatalogReleaseDetail>(`/catalog/${encodeURIComponent(id)}`),
+  catalogSources: (id: string) =>
+    req<CatalogSourceGroup[]>(`/catalog/${encodeURIComponent(id)}/sources`),
+
+  setIGDBCredentials: (input: { clientId: string; clientSecret: string }) =>
+    req<Settings>("/metadata/igdb/credentials", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
 }
 
-export function catalogCover(releaseId: number): string {
-  return `${BASE}/catalog/${releaseId}/cover`
+export function catalogCover(releaseId: string): string {
+  return `${BASE}/catalog/${encodeURIComponent(releaseId)}/cover`
 }
 
 export type ImageKind = "cover" | "screenshot"

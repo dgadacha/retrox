@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -10,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"retrox/internal/igdb"
 	"retrox/internal/openvgdb"
 	"retrox/internal/platforms"
 	"retrox/internal/sources"
@@ -17,131 +21,222 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// HandleCatalogPlatforms returns the platform-picker payload: one entry
-// per RETROX-supported platform that has at least one OpenVGDB release,
-// with the deduped game count for tile badges.
+// catalogue.go routes catalogue requests across two metadata backends:
+//
+//   * OpenVGDB (offline SQLite) — preferred when the platform has data
+//     because there's no network round-trip and no IGDB credential
+//     required. Covers NES/SNES/GB/.../PSX/PSP.
+//   * IGDB (Twitch-authed REST) — fallback for the platforms OpenVGDB
+//     doesn't ship: PS2, Dreamcast, Wii, Neo Geo. Also primary if the
+//     user explicitly wants modern coverage.
+//
+// Source picking happens per-platform and is exposed to the frontend
+// through a string release id: "ovgdb:42" vs "igdb:1942", so the same
+// /catalog/:id endpoint can serve both.
+
+const (
+	sourceOVGDB = "ovgdb"
+	sourceIGDB  = "igdb"
+)
+
+// HandleCatalogPlatforms returns one tile per RETROX-supported platform
+// that has *any* metadata available — preferring OpenVGDB's deduped
+// count, falling back to IGDB when configured.
 func (h *Handler) HandleCatalogPlatforms(c echo.Context) error {
-	if h.App.OpenVGDB == nil || !h.App.OpenVGDB.Ready() {
-		return RespondErr(c, http.StatusServiceUnavailable, "OpenVGDB indisponible")
-	}
-	var ids []int
-	for _, p := range platforms.All() {
-		if p.OpenVGDBID > 0 {
-			ids = append(ids, p.OpenVGDBID)
+	ctx := c.Request().Context()
+
+	// OpenVGDB counts (cheap, always available when DB is ready).
+	ovgdbCounts := map[int]int{}
+	if h.App.OpenVGDB != nil && h.App.OpenVGDB.Ready() {
+		var ids []int
+		for _, p := range platforms.All() {
+			if p.OpenVGDBID > 0 {
+				ids = append(ids, p.OpenVGDBID)
+			}
+		}
+		c, err := h.App.OpenVGDB.CountReleasesByPlatform(ctx, ids)
+		if err == nil {
+			ovgdbCounts = c
 		}
 	}
-	counts, err := h.App.OpenVGDB.CountReleasesByPlatform(c.Request().Context(), ids)
-	if err != nil {
-		return RespondErr(c, http.StatusInternalServerError, err.Error())
-	}
+
 	type tile struct {
-		ID         string `json:"id"`
-		Name       string `json:"name"`
-		OpenVGDBID int    `json:"openvgdbId"`
-		Count      int    `json:"count"`
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		Source string `json:"source"` // "ovgdb" | "igdb"
+		Count  int    `json:"count"`
 	}
-	out := make([]tile, 0, len(ids))
+
+	out := make([]tile, 0, 30)
+	igdbReady := h.App.IGDB != nil && h.App.IGDB.Configured()
+
 	for _, p := range platforms.All() {
-		if p.OpenVGDBID == 0 {
+		// Prefer OpenVGDB when it has data (offline + fast).
+		if n := ovgdbCounts[p.OpenVGDBID]; n > 0 {
+			out = append(out, tile{ID: p.ID, Name: p.Name, Source: sourceOVGDB, Count: n})
 			continue
 		}
-		n := counts[p.OpenVGDBID]
-		if n == 0 {
-			continue
+		// Fall back to IGDB for platforms it covers.
+		if igdbReady && p.IGDBID > 0 {
+			n, err := h.App.IGDB.CountByPlatform(ctx, p.IGDBID)
+			if err == nil && n > 0 {
+				out = append(out, tile{ID: p.ID, Name: p.Name, Source: sourceIGDB, Count: n})
+			}
 		}
-		out = append(out, tile{ID: p.ID, Name: p.Name, OpenVGDBID: p.OpenVGDBID, Count: n})
 	}
+
 	return RespondOK(c, out)
 }
 
-// HandleCatalogList returns a paginated slice of OpenVGDB releases.
-// Filter by `platform` (our internal id, e.g. "snes") and free-text
-// `q`. Falls back to "all RETROX-supported platforms" when no platform
-// is given so the user doesn't see games from systems they can't run.
+type taggedRelease struct {
+	ReleaseID        string `json:"releaseId"` // "ovgdb:42" or "igdb:1942"
+	Title            string `json:"title"`
+	CoverURL         string `json:"coverUrl,omitempty"`
+	SystemShortName  string `json:"systemShortName,omitempty"`
+	Region           string `json:"region,omitempty"`
+	PlatformID       string `json:"platformId"`
+	VariantCount     int    `json:"variantCount,omitempty"`
+	Source           string `json:"source"`
+}
+
+// HandleCatalogList pages through one platform's catalogue, picking the
+// right backend per-platform.
 func (h *Handler) HandleCatalogList(c echo.Context) error {
-	if h.App.OpenVGDB == nil || !h.App.OpenVGDB.Ready() {
-		return RespondErr(c, http.StatusServiceUnavailable,
-			"OpenVGDB n'est pas disponible — téléchargez-la dans Réglages")
-	}
 	page, _ := strconv.Atoi(c.QueryParam("page"))
 	if page < 1 {
 		page = 1
 	}
-	q := openvgdb.CatalogQuery{
-		SystemIDs: catalogSystemIDsFor(c.QueryParam("platform")),
-		Query:     c.QueryParam("q"),
-		Page:      page,
-		PageSize:  60,
+	platformID := c.QueryParam("platform")
+	query := c.QueryParam("q")
+
+	p, ok := platforms.ByID(platformID)
+	if !ok || platformID == "" {
+		return RespondErr(c, http.StatusBadRequest, "plateforme requise")
 	}
-	out, err := h.App.OpenVGDB.ListReleases(c.Request().Context(), q)
-	if err != nil {
-		return RespondErr(c, http.StatusInternalServerError, err.Error())
+
+	// OpenVGDB primary when it has the system.
+	if p.OpenVGDBID > 0 && h.App.OpenVGDB != nil && h.App.OpenVGDB.Ready() {
+		out, err := h.App.OpenVGDB.ListReleases(c.Request().Context(), openvgdb.CatalogQuery{
+			SystemIDs: []int{p.OpenVGDBID},
+			Query:     query,
+			Page:      page,
+			PageSize:  60,
+		})
+		if err != nil {
+			return RespondErr(c, http.StatusInternalServerError, err.Error())
+		}
+		items := make([]taggedRelease, 0, len(out.Items))
+		for _, r := range out.Items {
+			items = append(items, taggedRelease{
+				ReleaseID:       fmt.Sprintf("%s:%d", sourceOVGDB, r.ReleaseID),
+				Title:           r.Title,
+				CoverURL:        r.CoverURL,
+				SystemShortName: r.SystemShortName,
+				Region:          r.Region,
+				PlatformID:      p.ID,
+				VariantCount:    r.VariantCount,
+				Source:          sourceOVGDB,
+			})
+		}
+		return RespondOK(c, map[string]any{
+			"items": items, "total": out.Total, "page": out.Page, "hasMore": out.HasMore,
+		})
 	}
-	// Tag each release with our platform ID (frontend wants it for
-	// routing the download into the right folder).
-	type withPlatform struct {
-		openvgdb.Release
-		PlatformID string `json:"platformId"`
+
+	// IGDB fallback.
+	if p.IGDBID > 0 && h.App.IGDB != nil && h.App.IGDB.Configured() {
+		var (
+			games []igdb.Game
+			total int
+			err   error
+		)
+		if strings.TrimSpace(query) != "" {
+			games, err = h.App.IGDB.SearchByPlatform(c.Request().Context(), p.IGDBID, query, 60)
+			total = len(games)
+		} else {
+			out, lerr := h.App.IGDB.ListByPlatform(c.Request().Context(), p.IGDBID, page, 60)
+			err = lerr
+			if out != nil {
+				games = out.Items
+				total = out.Total
+			}
+		}
+		if err != nil {
+			return RespondErr(c, http.StatusBadGateway, err.Error())
+		}
+		items := make([]taggedRelease, 0, len(games))
+		for _, g := range games {
+			items = append(items, taggedRelease{
+				ReleaseID:  fmt.Sprintf("%s:%d", sourceIGDB, g.ID),
+				Title:      g.Name,
+				CoverURL:   g.CoverURL,
+				PlatformID: p.ID,
+				Source:     sourceIGDB,
+			})
+		}
+		return RespondOK(c, map[string]any{
+			"items": items, "total": total, "page": page, "hasMore": page*60 < total,
+		})
 	}
-	tagged := make([]withPlatform, 0, len(out.Items))
-	for _, r := range out.Items {
-		tagged = append(tagged, withPlatform{Release: r, PlatformID: platformIDFor(r.OpenVGDBSystemID)})
-	}
-	return RespondOK(c, map[string]any{
-		"items":   tagged,
-		"total":   out.Total,
-		"page":    out.Page,
-		"hasMore": out.HasMore,
-	})
+
+	return RespondErr(c, http.StatusNotFound,
+		"aucune source de métadonnées pour cette plateforme — configurez IGDB dans Réglages")
 }
 
-// HandleCatalogGet returns one release's full detail.
+// taggedReleaseDetail is the per-release detail payload, shared shape
+// across both backends.
+type taggedReleaseDetail struct {
+	ReleaseID       string `json:"releaseId"`
+	Title           string `json:"title"`
+	CoverURL        string `json:"coverUrl,omitempty"`
+	SystemShortName string `json:"systemShortName,omitempty"`
+	Region          string `json:"region,omitempty"`
+	PlatformID      string `json:"platformId"`
+	Description     string `json:"description,omitempty"`
+	Genre           string `json:"genre,omitempty"`
+	Developer       string `json:"developer,omitempty"`
+	Publisher       string `json:"publisher,omitempty"`
+	ReleaseDate     string `json:"releaseDate,omitempty"`
+	BackCoverURL    string `json:"backCoverUrl,omitempty"`
+	Source          string `json:"source"`
+}
+
+// HandleCatalogGet dispatches on the "<source>:<id>" prefix.
 func (h *Handler) HandleCatalogGet(c echo.Context) error {
-	if h.App.OpenVGDB == nil || !h.App.OpenVGDB.Ready() {
-		return RespondErr(c, http.StatusServiceUnavailable, "OpenVGDB indisponible")
-	}
-	id, err := strconv.Atoi(c.Param("id"))
+	source, idNum, err := parseCompositeID(c.Param("id"))
 	if err != nil {
-		return RespondErr(c, http.StatusBadRequest, "id invalide")
+		return RespondErr(c, http.StatusBadRequest, err.Error())
 	}
-	r, err := h.App.OpenVGDB.GetRelease(c.Request().Context(), id)
+	d, err := h.getReleaseDetail(c.Request().Context(), source, idNum)
 	if err != nil {
-		return RespondErr(c, http.StatusInternalServerError, err.Error())
+		return RespondErr(c, statusFor(err), err.Error())
 	}
-	if r == nil {
+	if d == nil {
 		return RespondErr(c, http.StatusNotFound, "release introuvable")
 	}
-	type withPlatform struct {
-		openvgdb.ReleaseDetail
-		PlatformID string `json:"platformId"`
-	}
-	return RespondOK(c, withPlatform{ReleaseDetail: *r, PlatformID: platformIDFor(r.OpenVGDBSystemID)})
+	return RespondOK(c, d)
 }
 
-// HandleCatalogCover proxies the release's coverFront URL (gamefaqs CDN
-// behind Cloudflare), adding a browser-like User-Agent so the request
-// isn't bot-challenged, and disk-caching the bytes for next time.
+// HandleCatalogCover proxies the per-release cover regardless of source.
+// OpenVGDB: gamefaqs hotlink (needs browser UA); IGDB: images.igdb.com
+// (no Cloudflare). Both get the same disk cache treatment.
 func (h *Handler) HandleCatalogCover(c echo.Context) error {
-	if h.App.OpenVGDB == nil || !h.App.OpenVGDB.Ready() {
-		return RespondErr(c, http.StatusServiceUnavailable, "OpenVGDB indisponible")
-	}
-	id, err := strconv.Atoi(c.Param("id"))
+	source, idNum, err := parseCompositeID(c.Param("id"))
 	if err != nil {
-		return RespondErr(c, http.StatusBadRequest, "id invalide")
+		return RespondErr(c, http.StatusBadRequest, err.Error())
 	}
-	r, err := h.App.OpenVGDB.GetRelease(c.Request().Context(), id)
-	if err != nil || r == nil || r.CoverURL == "" {
+	d, err := h.getReleaseDetail(c.Request().Context(), source, idNum)
+	if err != nil || d == nil || d.CoverURL == "" {
 		return RespondErr(c, http.StatusNotFound, "pas de jaquette")
 	}
 
 	cacheDir := filepath.Join(h.App.Config.Data.Dir, "imgcache")
-	sum := sha1.Sum([]byte("catalog|" + r.CoverURL))
+	sum := sha1.Sum([]byte("catalog|" + d.CoverURL))
 	cachePath := filepath.Join(cacheDir, hex.EncodeToString(sum[:]))
 	if body, rerr := os.ReadFile(cachePath); rerr == nil {
 		return c.Blob(http.StatusOK, http.DetectContentType(body), body)
 	}
-
-	body, contentType, err := fetchBytes(r.CoverURL)
+	body, contentType, err := fetchBytes(d.CoverURL)
 	if err != nil {
 		return RespondErr(c, http.StatusBadGateway, err.Error())
 	}
@@ -154,23 +249,17 @@ func (h *Handler) HandleCatalogCover(c echo.Context) error {
 	return c.Blob(http.StatusOK, contentType, body)
 }
 
-// HandleCatalogSources fans out the title across every registered Source
-// in parallel and returns the merged candidates so the detail page can
-// render them as a pick-list.
+// HandleCatalogSources fans the title across every registered Source.
+// Source dispatch first resolves the title via the appropriate backend.
 func (h *Handler) HandleCatalogSources(c echo.Context) error {
-	if h.App.OpenVGDB == nil || !h.App.OpenVGDB.Ready() {
-		return RespondErr(c, http.StatusServiceUnavailable, "OpenVGDB indisponible")
-	}
-	id, err := strconv.Atoi(c.Param("id"))
+	source, idNum, err := parseCompositeID(c.Param("id"))
 	if err != nil {
-		return RespondErr(c, http.StatusBadRequest, "id invalide")
+		return RespondErr(c, http.StatusBadRequest, err.Error())
 	}
-	r, err := h.App.OpenVGDB.GetRelease(c.Request().Context(), id)
-	if err != nil || r == nil {
+	d, err := h.getReleaseDetail(c.Request().Context(), source, idNum)
+	if err != nil || d == nil {
 		return RespondErr(c, http.StatusNotFound, "release introuvable")
 	}
-	platform := platformIDFor(r.OpenVGDBSystemID)
-	title := strings.TrimSpace(r.Title)
 
 	results := make([]sources.AggregatedResult, len(h.App.Sources))
 	var wg sync.WaitGroup
@@ -180,9 +269,7 @@ func (h *Handler) HandleCatalogSources(c echo.Context) error {
 		go func() {
 			defer wg.Done()
 			info := sources.InfoFrom(src)
-			items, err := src.Search(c.Request().Context(), title, platform)
-			// Materialise a nil slice into [] so the frontend never has
-			// to guard against `null.length`.
+			items, err := src.Search(c.Request().Context(), d.Title, d.PlatformID)
 			if items == nil {
 				items = []sources.ROM{}
 			}
@@ -197,32 +284,100 @@ func (h *Handler) HandleCatalogSources(c echo.Context) error {
 	return RespondOK(c, results)
 }
 
-// platformIDFor inverts the platforms catalog: given an OpenVGDB
-// system id, returns our internal platform id ("snes", "n64", …).
-func platformIDFor(openvgdbID int) string {
+// -----------------------------------------------------------------------------
+// shared helpers
+// -----------------------------------------------------------------------------
+
+// getReleaseDetail dispatches the per-source detail fetch and flattens
+// it to the unified taggedReleaseDetail shape.
+func (h *Handler) getReleaseDetail(ctx context.Context, source string, id int) (*taggedReleaseDetail, error) {
+	switch source {
+	case sourceOVGDB:
+		if h.App.OpenVGDB == nil || !h.App.OpenVGDB.Ready() {
+			return nil, errors.New("OpenVGDB indisponible")
+		}
+		r, err := h.App.OpenVGDB.GetRelease(ctx, id)
+		if err != nil || r == nil {
+			return nil, err
+		}
+		return &taggedReleaseDetail{
+			ReleaseID:       fmt.Sprintf("%s:%d", sourceOVGDB, r.ReleaseID),
+			Title:           r.Title,
+			CoverURL:        r.CoverURL,
+			BackCoverURL:    r.BackCoverURL,
+			SystemShortName: r.SystemShortName,
+			Region:          r.Region,
+			PlatformID:      platformIDFor(r.OpenVGDBSystemID, 0),
+			Description:     r.Description,
+			Genre:           r.Genre,
+			Developer:       r.Developer,
+			Publisher:       r.Publisher,
+			ReleaseDate:     r.ReleaseDate,
+			Source:          sourceOVGDB,
+		}, nil
+	case sourceIGDB:
+		if h.App.IGDB == nil || !h.App.IGDB.Configured() {
+			return nil, errors.New("IGDB non configuré")
+		}
+		g, err := h.App.IGDB.GetByID(ctx, id)
+		if err != nil || g == nil {
+			return nil, err
+		}
+		date := ""
+		if g.FirstYear > 0 {
+			date = strconv.Itoa(g.FirstYear)
+		}
+		return &taggedReleaseDetail{
+			ReleaseID:   fmt.Sprintf("%s:%d", sourceIGDB, g.ID),
+			Title:       g.Name,
+			CoverURL:    g.CoverURL,
+			PlatformID:  platformIDFor(0, g.PlatformID),
+			Description: g.Summary,
+			Genre:       g.Genre,
+			Developer:   g.Company,
+			ReleaseDate: date,
+			Source:      sourceIGDB,
+		}, nil
+	}
+	return nil, fmt.Errorf("source inconnue %q", source)
+}
+
+// parseCompositeID splits "ovgdb:42" / "igdb:1942" into its parts.
+func parseCompositeID(s string) (string, int, error) {
+	parts := strings.SplitN(s, ":", 2)
+	if len(parts) != 2 {
+		return "", 0, errors.New("id invalide (format attendu: <source>:<n>)")
+	}
+	n, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return "", 0, errors.New("id numérique invalide")
+	}
+	return parts[0], n, nil
+}
+
+// statusFor maps a backend error to a sensible HTTP code.
+func statusFor(err error) int {
+	if err == nil {
+		return http.StatusOK
+	}
+	switch err.Error() {
+	case "OpenVGDB indisponible", "IGDB non configuré":
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusInternalServerError
+}
+
+// platformIDFor looks up our internal platform id from either an
+// OpenVGDB system id or an IGDB platform id. Pass 0 for the one you
+// don't have.
+func platformIDFor(openvgdbID, igdbID int) string {
 	for _, p := range platforms.All() {
-		if p.OpenVGDBID == openvgdbID {
+		if openvgdbID > 0 && p.OpenVGDBID == openvgdbID {
+			return p.ID
+		}
+		if igdbID > 0 && p.IGDBID == igdbID {
 			return p.ID
 		}
 	}
 	return ""
-}
-
-// catalogSystemIDsFor returns the OpenVGDB system ids matching either a
-// single platform filter or the union of all RETROX-supported platforms
-// (so an empty filter still hides systems we can't run).
-func catalogSystemIDsFor(platformID string) []int {
-	if platformID != "" {
-		if p, ok := platforms.ByID(platformID); ok && p.OpenVGDBID > 0 {
-			return []int{p.OpenVGDBID}
-		}
-		return []int{0} // unknown filter → no results
-	}
-	var out []int
-	for _, p := range platforms.All() {
-		if p.OpenVGDBID > 0 {
-			out = append(out, p.OpenVGDBID)
-		}
-	}
-	return out
 }
