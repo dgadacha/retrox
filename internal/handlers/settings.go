@@ -6,18 +6,20 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// HandleGetSettings returns the admin-mutable server config. IGDB
-// secret is echoed back as a "is it set" boolean so the UI can hide
-// the input behind a "•••••• (défini)" placeholder.
+// HandleGetSettings returns the admin-mutable server config. Secrets
+// (IGDB password, TGDB key) come back as "is it set" booleans so the
+// UI can render a "•••••• (défini)" placeholder without leaking them.
 func (h *Handler) HandleGetSettings(c echo.Context) error {
 	cfg := h.App.Config
 	return RespondOK(c, map[string]any{
-		"romDirs":               cfg.Library.Roots,
-		"retroarchBin":          cfg.Emulator.RetroArchBin,
-		"retroarchCores":        cfg.Emulator.RetroArchCores,
-		"openvgdbPath":          cfg.Metadata.Path,
-		"igdbClientId":          cfg.Metadata.IGDBClientID,
-		"igdbClientSecretSet":   cfg.Metadata.IGDBClientSecret != "",
+		"romDirs":             cfg.Library.Roots,
+		"retroarchBin":        cfg.Emulator.RetroArchBin,
+		"retroarchCores":      cfg.Emulator.RetroArchCores,
+		"openvgdbPath":        cfg.Metadata.Path,
+		"igdbClientId":        cfg.Metadata.IGDBClientID,
+		"igdbClientSecretSet": cfg.Metadata.IGDBClientSecret != "",
+		"tgdbKeySet":          cfg.Metadata.TGDBKey != "",
+		"metadataPreference":  cfg.Metadata.Preference,
 	})
 }
 
@@ -43,6 +45,14 @@ type igdbCredsReq struct {
 	ClientSecret string `json:"clientSecret"` // "" = keep current
 }
 
+type tgdbKeyReq struct {
+	Key string `json:"key"` // "" = clear
+}
+
+type prefReq struct {
+	Preference string `json:"preference"`
+}
+
 // HandleSetIGDBCreds updates Twitch OAuth credentials and verifies them
 // by asking for an access token. Failed auth comes back as 400 so the
 // UI can red-flag the inputs.
@@ -65,6 +75,39 @@ func (h *Handler) HandleSetIGDBCreds(c echo.Context) error {
 			return RespondErr(c, http.StatusBadRequest,
 				"credentials refusés par Twitch/IGDB : "+err.Error())
 		}
+	}
+	return h.HandleGetSettings(c)
+}
+
+// HandleSetTGDBKey persists + verifies the TheGamesDB API key by
+// probing one platform (NES = id 7). Bad key → 400.
+func (h *Handler) HandleSetTGDBKey(c echo.Context) error {
+	var req tgdbKeyReq
+	if err := c.Bind(&req); err != nil {
+		return RespondErr(c, http.StatusBadRequest, "corps de requête invalide")
+	}
+	if err := h.App.ApplyTGDBKey(req.Key); err != nil {
+		return RespondErr(c, http.StatusInternalServerError, err.Error())
+	}
+	if req.Key != "" {
+		if _, err := h.App.TGDB.CountByPlatform(c.Request().Context(), 7); err != nil {
+			return RespondErr(c, http.StatusBadRequest,
+				"clé refusée par TheGamesDB : "+err.Error())
+		}
+	}
+	return h.HandleGetSettings(c)
+}
+
+// HandleSetMetadataPreference picks which catalogue backend wins when
+// several are configured. "auto" lets the router pick (IGDB > TGDB >
+// OpenVGDB); the explicit values force one source.
+func (h *Handler) HandleSetMetadataPreference(c echo.Context) error {
+	var req prefReq
+	if err := c.Bind(&req); err != nil {
+		return RespondErr(c, http.StatusBadRequest, "corps de requête invalide")
+	}
+	if err := h.App.ApplyMetadataPreference(req.Preference); err != nil {
+		return RespondErr(c, http.StatusBadRequest, err.Error())
 	}
 	return h.HandleGetSettings(c)
 }

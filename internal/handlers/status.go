@@ -29,8 +29,10 @@ func (h *Handler) HandleStatus(c echo.Context) error {
 			"games":             total,
 			"gamesScraped":      scraped,
 			"scanning":          scanner.Running(),
-			"defaultProfileUid": h.App.DefaultProfileUID(),
-			"igdbConfigured":    h.App.IGDB != nil && h.App.IGDB.Configured(),
+			"defaultProfileUid":   h.App.DefaultProfileUID(),
+			"igdbConfigured":     h.App.IGDB != nil && h.App.IGDB.Configured(),
+			"tgdbConfigured":     h.App.TGDB != nil && h.App.TGDB.Configured(),
+			"metadataPreference": h.App.Config.Metadata.Preference,
 		},
 	})
 }

@@ -83,6 +83,8 @@ func RegisterRoutes(e *echo.Echo, h *Handler) {
 
 	v1.POST("/metadata/openvgdb/download", h.HandleDownloadOpenVGDB)
 	v1.PUT("/metadata/igdb/credentials", h.HandleSetIGDBCreds)
+	v1.PUT("/metadata/tgdb/key", h.HandleSetTGDBKey)
+	v1.PUT("/metadata/preference", h.HandleSetMetadataPreference)
 
 	cat := v1.Group("/catalog")
 	cat.GET("", h.HandleCatalogList)

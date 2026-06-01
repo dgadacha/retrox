@@ -113,6 +113,16 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input),
     }),
+  setTGDBKey: (input: { key: string }) =>
+    req<Settings>("/metadata/tgdb/key", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+  setMetadataPreference: (input: { preference: string }) =>
+    req<Settings>("/metadata/preference", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
 }
 
 export function catalogCover(releaseId: string): string {

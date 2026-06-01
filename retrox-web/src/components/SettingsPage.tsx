@@ -18,8 +18,10 @@ export function SettingsPage() {
       </header>
 
       <div className="mx-auto w-full max-w-4xl space-y-6 px-6 py-8 lg:px-10">
+        <MetadataPreferenceSection />
         <OpenVGDBSection />
         <IGDBSection />
+        <TGDBSection />
         <ServerConfigForm />
         <ScanSection />
         <EmulatorEditor />
@@ -45,6 +47,136 @@ function Label({ children }: { children: ReactNode }) {
     <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-text-700">
       {children}
     </label>
+  )
+}
+
+function MetadataPreferenceSection() {
+  const statusQ = useStatus()
+  const qc = useQueryClient()
+  const m = useMutation({
+    mutationFn: (preference: string) => api.setMetadataPreference({ preference }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.settings })
+      qc.invalidateQueries({ queryKey: qk.status })
+      qc.invalidateQueries({ queryKey: ["catalog-platforms"] })
+    },
+  })
+  const pref = statusQ.data?.metadataPreference ?? "auto"
+
+  return (
+    <Card
+      title="Source de métadonnées préférée"
+      desc="Détermine quelle base alimente le catalogue. « Automatique » prend IGDB en priorité, puis TheGamesDB, puis OpenVGDB selon ce qui est configuré."
+    >
+      <div className="flex flex-wrap items-center gap-3">
+        <select
+          className={`${inputClass} w-60`}
+          value={pref}
+          onChange={(e) => m.mutate(e.target.value)}
+        >
+          <option value="auto">Automatique (recommandé)</option>
+          <option value="igdb">IGDB (Twitch)</option>
+          <option value="tgdb">TheGamesDB</option>
+          <option value="openvgdb">OpenVGDB (hors-ligne)</option>
+        </select>
+        {m.isPending && <Spinner className="h-4 w-4" />}
+        {m.isSuccess && (
+          <span className="inline-flex items-center gap-1.5 text-sm text-emerald-400">
+            <Check className="h-4 w-4" strokeWidth={2.5} />
+            Préférence sauvegardée
+          </span>
+        )}
+      </div>
+    </Card>
+  )
+}
+
+function TGDBSection() {
+  const settingsQ = useSettings()
+  const statusQ = useStatus()
+  const qc = useQueryClient()
+  const [key, setKey] = useState("")
+  const s = settingsQ.data
+
+  const saveM = useMutation({
+    mutationFn: () => api.setTGDBKey({ key }),
+    onSuccess: () => {
+      setKey("")
+      qc.invalidateQueries({ queryKey: qk.settings })
+      qc.invalidateQueries({ queryKey: qk.status })
+      qc.invalidateQueries({ queryKey: ["catalog-platforms"] })
+    },
+  })
+
+  const configured = !!statusQ.data?.tgdbConfigured
+
+  return (
+    <Card
+      title="Source de métadonnées — TheGamesDB"
+      desc={
+        <>
+          Alternative à IGDB sans Twitch (juste un email). Inscris-toi sur{" "}
+          <a
+            href="https://thegamesdb.net/register.php"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="text-accent-400 hover:underline"
+          >
+            thegamesdb.net/register.php
+          </a>
+          {" "}puis demande une clé API gratuite sur{" "}
+          <a
+            href="https://forums.thegamesdb.net/viewforum.php?f=10"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="text-accent-400 hover:underline"
+          >
+            le forum
+          </a>
+          {" "}(catégorie « API Discussion »). Quota : ~5 000 requêtes / mois en gratuit.
+        </>
+      }
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        {configured ? (
+          <Badge tone="success">Connecté</Badge>
+        ) : (
+          <Badge tone="warn">Non configuré</Badge>
+        )}
+      </div>
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          saveM.mutate()
+        }}
+      >
+        <div>
+          <Label>Clé API</Label>
+          <input
+            type="password"
+            className={inputClass}
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            placeholder={s?.tgdbKeySet ? "•••••• (définie)" : "non définie"}
+          />
+        </div>
+        <div className="flex items-center gap-3">
+          <Button type="submit" variant="primary" disabled={saveM.isPending}>
+            {saveM.isPending ? <Spinner className="h-4 w-4" /> : "Vérifier + enregistrer"}
+          </Button>
+          {saveM.isSuccess && (
+            <span className="inline-flex items-center gap-1.5 text-sm text-emerald-400">
+              <Check className="h-4 w-4" strokeWidth={2.5} />
+              TheGamesDB connecté
+            </span>
+          )}
+          {saveM.isError && (
+            <span className="text-sm text-red-400">{(saveM.error as Error).message}</span>
+          )}
+        </div>
+      </form>
+    </Card>
   )
 }
 

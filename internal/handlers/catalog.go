@@ -17,6 +17,7 @@ import (
 	"retrox/internal/openvgdb"
 	"retrox/internal/platforms"
 	"retrox/internal/sources"
+	"retrox/internal/tgdb"
 
 	"github.com/labstack/echo/v4"
 )
@@ -39,22 +40,58 @@ import (
 const (
 	sourceOVGDB = "ovgdb"
 	sourceIGDB  = "igdb"
+	sourceTGDB  = "tgdb"
 )
 
-// HandleCatalogPlatforms returns one tile per RETROX-supported platform
-// that has *any* metadata available. IGDB is the user-visible default
-// when configured (uniform quality); OpenVGDB is the fallback for
-// platforms where IGDB can't help OR when the user hasn't pasted
-// Twitch creds yet.
-func (h *Handler) HandleCatalogPlatforms(c echo.Context) error {
-	ctx := c.Request().Context()
+// pickSource returns the metadata backend to use for one platform,
+// honoring the user's Preference setting. "auto" walks the preferred
+// order (IGDB > TGDB > OpenVGDB) and picks the first one that has
+// data for the platform; explicit values force their choice (no
+// fallback — the UI shows an error if that source isn't usable).
+func (h *Handler) pickSource(p platforms.Platform) string {
+	pref := h.App.Config.Metadata.Preference
+	if pref == "" {
+		pref = "auto"
+	}
 	igdbReady := h.App.IGDB != nil && h.App.IGDB.Configured()
+	tgdbReady := h.App.TGDB != nil && h.App.TGDB.Configured()
 	ovgdbReady := h.App.OpenVGDB != nil && h.App.OpenVGDB.Ready()
 
-	// Pre-load OpenVGDB counts (cheap, always available when DB is
-	// ready) so the fallback path doesn't have to round-trip per row.
+	switch pref {
+	case "igdb":
+		if igdbReady && p.IGDBID > 0 {
+			return sourceIGDB
+		}
+	case "tgdb":
+		if tgdbReady && p.TGDBID > 0 {
+			return sourceTGDB
+		}
+	case "openvgdb":
+		if ovgdbReady && p.OpenVGDBID > 0 {
+			return sourceOVGDB
+		}
+	case "auto":
+		if igdbReady && p.IGDBID > 0 {
+			return sourceIGDB
+		}
+		if tgdbReady && p.TGDBID > 0 {
+			return sourceTGDB
+		}
+		if ovgdbReady && p.OpenVGDBID > 0 {
+			return sourceOVGDB
+		}
+	}
+	return ""
+}
+
+// HandleCatalogPlatforms returns one tile per RETROX-supported platform
+// that has any metadata available, picking the source per pickSource()
+// (which honours the user's Preference). OpenVGDB counts are
+// pre-loaded once to avoid a per-row round-trip.
+func (h *Handler) HandleCatalogPlatforms(c echo.Context) error {
+	ctx := c.Request().Context()
 	ovgdbCounts := map[int]int{}
-	if ovgdbReady {
+	if h.App.OpenVGDB != nil && h.App.OpenVGDB.Ready() {
 		var ids []int
 		for _, p := range platforms.All() {
 			if p.OpenVGDBID > 0 {
@@ -70,24 +107,27 @@ func (h *Handler) HandleCatalogPlatforms(c echo.Context) error {
 	type tile struct {
 		ID     string `json:"id"`
 		Name   string `json:"name"`
-		Source string `json:"source"` // "ovgdb" | "igdb"
+		Source string `json:"source"`
 		Count  int    `json:"count"`
 	}
 	out := make([]tile, 0, 30)
 
 	for _, p := range platforms.All() {
-		// Prefer IGDB whenever it's wired up — that's the "full IGDB"
-		// experience the user opted into.
-		if igdbReady && p.IGDBID > 0 {
-			n, err := h.App.IGDB.CountByPlatform(ctx, p.IGDBID)
-			if err == nil && n > 0 {
-				out = append(out, tile{ID: p.ID, Name: p.Name, Source: sourceIGDB, Count: n})
-				continue
-			}
+		src := h.pickSource(p)
+		if src == "" {
+			continue
 		}
-		// Fall back to OpenVGDB.
-		if n := ovgdbCounts[p.OpenVGDBID]; n > 0 {
-			out = append(out, tile{ID: p.ID, Name: p.Name, Source: sourceOVGDB, Count: n})
+		var n int
+		switch src {
+		case sourceIGDB:
+			n, _ = h.App.IGDB.CountByPlatform(ctx, p.IGDBID)
+		case sourceTGDB:
+			n, _ = h.App.TGDB.CountByPlatform(ctx, p.TGDBID)
+		case sourceOVGDB:
+			n = ovgdbCounts[p.OpenVGDBID]
+		}
+		if n > 0 {
+			out = append(out, tile{ID: p.ID, Name: p.Name, Source: src, Count: n})
 		}
 	}
 
@@ -120,73 +160,114 @@ func (h *Handler) HandleCatalogList(c echo.Context) error {
 		return RespondErr(c, http.StatusBadRequest, "plateforme requise")
 	}
 
-	// IGDB primary when configured.
-	if p.IGDBID > 0 && h.App.IGDB != nil && h.App.IGDB.Configured() {
-		var (
-			games []igdb.Game
-			total int
-			err   error
-		)
-		if strings.TrimSpace(query) != "" {
-			games, err = h.App.IGDB.SearchByPlatform(c.Request().Context(), p.IGDBID, query, 60)
-			total = len(games)
-		} else {
-			out, lerr := h.App.IGDB.ListByPlatform(c.Request().Context(), p.IGDBID, page, 60)
-			err = lerr
-			if out != nil {
-				games = out.Items
-				total = out.Total
-			}
-		}
-		if err != nil {
-			return RespondErr(c, http.StatusBadGateway, err.Error())
-		}
-		items := make([]taggedRelease, 0, len(games))
-		for _, g := range games {
-			items = append(items, taggedRelease{
-				ReleaseID:  fmt.Sprintf("%s:%d", sourceIGDB, g.ID),
-				Title:      g.Name,
-				CoverURL:   g.CoverURL,
-				PlatformID: p.ID,
-				Source:     sourceIGDB,
-			})
-		}
-		return RespondOK(c, map[string]any{
-			"items": items, "total": total, "page": page, "hasMore": page*60 < total,
-		})
+	switch h.pickSource(p) {
+	case sourceIGDB:
+		return h.listIGDB(c, p, query, page)
+	case sourceTGDB:
+		return h.listTGDB(c, p, query, page)
+	case sourceOVGDB:
+		return h.listOpenVGDB(c, p, query, page)
 	}
-
-	// OpenVGDB fallback (IGDB not configured, or platform not in IGDB).
-	if p.OpenVGDBID > 0 && h.App.OpenVGDB != nil && h.App.OpenVGDB.Ready() {
-		out, err := h.App.OpenVGDB.ListReleases(c.Request().Context(), openvgdb.CatalogQuery{
-			SystemIDs: []int{p.OpenVGDBID},
-			Query:     query,
-			Page:      page,
-			PageSize:  60,
-		})
-		if err != nil {
-			return RespondErr(c, http.StatusInternalServerError, err.Error())
-		}
-		items := make([]taggedRelease, 0, len(out.Items))
-		for _, r := range out.Items {
-			items = append(items, taggedRelease{
-				ReleaseID:       fmt.Sprintf("%s:%d", sourceOVGDB, r.ReleaseID),
-				Title:           r.Title,
-				CoverURL:        r.CoverURL,
-				SystemShortName: r.SystemShortName,
-				Region:          r.Region,
-				PlatformID:      p.ID,
-				VariantCount:    r.VariantCount,
-				Source:          sourceOVGDB,
-			})
-		}
-		return RespondOK(c, map[string]any{
-			"items": items, "total": out.Total, "page": out.Page, "hasMore": out.HasMore,
-		})
-	}
-
 	return RespondErr(c, http.StatusNotFound,
-		"aucune source de métadonnées pour cette plateforme — configurez IGDB dans Réglages")
+		"aucune source de métadonnées pour cette plateforme — configurez IGDB ou TheGamesDB dans Réglages")
+}
+
+func (h *Handler) listIGDB(c echo.Context, p platforms.Platform, query string, page int) error {
+	var (
+		games []igdb.Game
+		total int
+		err   error
+	)
+	if strings.TrimSpace(query) != "" {
+		games, err = h.App.IGDB.SearchByPlatform(c.Request().Context(), p.IGDBID, query, 60)
+		total = len(games)
+	} else {
+		out, lerr := h.App.IGDB.ListByPlatform(c.Request().Context(), p.IGDBID, page, 60)
+		err = lerr
+		if out != nil {
+			games = out.Items
+			total = out.Total
+		}
+	}
+	if err != nil {
+		return RespondErr(c, http.StatusBadGateway, err.Error())
+	}
+	items := make([]taggedRelease, 0, len(games))
+	for _, g := range games {
+		items = append(items, taggedRelease{
+			ReleaseID:  fmt.Sprintf("%s:%d", sourceIGDB, g.ID),
+			Title:      g.Name,
+			CoverURL:   g.CoverURL,
+			PlatformID: p.ID,
+			Source:     sourceIGDB,
+		})
+	}
+	return RespondOK(c, map[string]any{
+		"items": items, "total": total, "page": page, "hasMore": page*60 < total,
+	})
+}
+
+func (h *Handler) listTGDB(c echo.Context, p platforms.Platform, query string, page int) error {
+	var (
+		games []tgdb.Game
+		total int
+		err   error
+	)
+	if strings.TrimSpace(query) != "" {
+		games, err = h.App.TGDB.SearchByPlatform(c.Request().Context(), p.TGDBID, query, 60)
+		total = len(games)
+	} else {
+		out, lerr := h.App.TGDB.ListByPlatform(c.Request().Context(), p.TGDBID, page)
+		err = lerr
+		if out != nil {
+			games = out.Items
+			total = out.Total
+		}
+	}
+	if err != nil {
+		return RespondErr(c, http.StatusBadGateway, err.Error())
+	}
+	items := make([]taggedRelease, 0, len(games))
+	for _, g := range games {
+		items = append(items, taggedRelease{
+			ReleaseID:  fmt.Sprintf("%s:%d", sourceTGDB, g.ID),
+			Title:      g.Title,
+			CoverURL:   g.CoverURL,
+			PlatformID: p.ID,
+			Source:     sourceTGDB,
+		})
+	}
+	return RespondOK(c, map[string]any{
+		"items": items, "total": total, "page": page, "hasMore": page*60 < total,
+	})
+}
+
+func (h *Handler) listOpenVGDB(c echo.Context, p platforms.Platform, query string, page int) error {
+	out, err := h.App.OpenVGDB.ListReleases(c.Request().Context(), openvgdb.CatalogQuery{
+		SystemIDs: []int{p.OpenVGDBID},
+		Query:     query,
+		Page:      page,
+		PageSize:  60,
+	})
+	if err != nil {
+		return RespondErr(c, http.StatusInternalServerError, err.Error())
+	}
+	items := make([]taggedRelease, 0, len(out.Items))
+	for _, r := range out.Items {
+		items = append(items, taggedRelease{
+			ReleaseID:       fmt.Sprintf("%s:%d", sourceOVGDB, r.ReleaseID),
+			Title:           r.Title,
+			CoverURL:        r.CoverURL,
+			SystemShortName: r.SystemShortName,
+			Region:          r.Region,
+			PlatformID:      p.ID,
+			VariantCount:    r.VariantCount,
+			Source:          sourceOVGDB,
+		})
+	}
+	return RespondOK(c, map[string]any{
+		"items": items, "total": out.Total, "page": out.Page, "hasMore": out.HasMore,
+	})
 }
 
 // taggedReleaseDetail is the per-release detail payload, shared shape
@@ -313,7 +394,7 @@ func (h *Handler) getReleaseDetail(ctx context.Context, source string, id int) (
 			BackCoverURL:    r.BackCoverURL,
 			SystemShortName: r.SystemShortName,
 			Region:          r.Region,
-			PlatformID:      platformIDFor(r.OpenVGDBSystemID, 0),
+			PlatformID:      platformIDFor(r.OpenVGDBSystemID, 0, 0),
 			Description:     r.Description,
 			Genre:           r.Genre,
 			Developer:       r.Developer,
@@ -337,12 +418,32 @@ func (h *Handler) getReleaseDetail(ctx context.Context, source string, id int) (
 			ReleaseID:   fmt.Sprintf("%s:%d", sourceIGDB, g.ID),
 			Title:       g.Name,
 			CoverURL:    g.CoverURL,
-			PlatformID:  platformIDFor(0, g.PlatformID),
+			PlatformID:  platformIDFor(0, g.PlatformID, 0),
 			Description: g.Summary,
 			Genre:       g.Genre,
 			Developer:   g.Company,
 			ReleaseDate: date,
 			Source:      sourceIGDB,
+		}, nil
+	case sourceTGDB:
+		if h.App.TGDB == nil || !h.App.TGDB.Configured() {
+			return nil, errors.New("TheGamesDB non configuré")
+		}
+		g, err := h.App.TGDB.GetByID(ctx, id)
+		if err != nil || g == nil {
+			return nil, err
+		}
+		return &taggedReleaseDetail{
+			ReleaseID:   fmt.Sprintf("%s:%d", sourceTGDB, g.ID),
+			Title:       g.Title,
+			CoverURL:    g.CoverURL,
+			PlatformID:  platformIDFor(0, 0, g.PlatformID),
+			Description: g.Summary,
+			Genre:       g.Genre,
+			Developer:   g.Developer,
+			Publisher:   g.Publisher,
+			ReleaseDate: g.ReleaseDate,
+			Source:      sourceTGDB,
 		}, nil
 	}
 	return nil, fmt.Errorf("source inconnue %q", source)
@@ -367,21 +468,24 @@ func statusFor(err error) int {
 		return http.StatusOK
 	}
 	switch err.Error() {
-	case "OpenVGDB indisponible", "IGDB non configuré":
+	case "OpenVGDB indisponible", "IGDB non configuré", "TheGamesDB non configuré":
 		return http.StatusServiceUnavailable
 	}
 	return http.StatusInternalServerError
 }
 
-// platformIDFor looks up our internal platform id from either an
-// OpenVGDB system id or an IGDB platform id. Pass 0 for the one you
-// don't have.
-func platformIDFor(openvgdbID, igdbID int) string {
+// platformIDFor looks up our internal platform id from any combination
+// of source ids — pass 0 for the ones you don't have. First non-zero
+// match wins so callers don't need to know the precedence.
+func platformIDFor(openvgdbID, igdbID, tgdbID int) string {
 	for _, p := range platforms.All() {
 		if openvgdbID > 0 && p.OpenVGDBID == openvgdbID {
 			return p.ID
 		}
 		if igdbID > 0 && p.IGDBID == igdbID {
+			return p.ID
+		}
+		if tgdbID > 0 && p.TGDBID == tgdbID {
 			return p.ID
 		}
 	}

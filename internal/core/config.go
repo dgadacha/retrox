@@ -49,6 +49,15 @@ type Config struct {
 		// falls back to OpenVGDB / libretro-thumbnails only.
 		IGDBClientID     string
 		IGDBClientSecret string
+
+		// TGDBKey is the TheGamesDB v1 API key (free, no SMS hassle).
+		// Alternative to IGDB; whichever the user picks via Preference.
+		TGDBKey string
+
+		// Preference selects which catalogue backend wins when multiple
+		// are configured. Values: "auto" (IGDB > TGDB > OpenVGDB),
+		// "openvgdb", "igdb", "tgdb". Empty = "auto".
+		Preference string
 	}
 	Library struct {
 		// Colon-separated list of root folders to scan for ROMs. Each root
@@ -107,6 +116,10 @@ func loadConfig() (*Config, error) {
 	// UI for first-time setup. Both empty = IGDB disabled.
 	cfg.Metadata.IGDBClientID = os.Getenv("RETROX_IGDB_CLIENT_ID")
 	cfg.Metadata.IGDBClientSecret = os.Getenv("RETROX_IGDB_CLIENT_SECRET")
+
+	// TheGamesDB API key + source preference.
+	cfg.Metadata.TGDBKey = os.Getenv("RETROX_TGDB_KEY")
+	cfg.Metadata.Preference = firstNonEmpty(os.Getenv("RETROX_METADATA_PREFERENCE"), "auto")
 
 	// Library roots — RETROX_ROM_DIRS is a ':'-separated list. Default
 	// to <binaryDir>/roms so dropping a ROM in the project folder

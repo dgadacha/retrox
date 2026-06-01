@@ -95,6 +95,8 @@ export interface Status {
   openvgdbReleases: number
   openvgdbPath: string
   igdbConfigured: boolean
+  tgdbConfigured: boolean
+  metadataPreference: string // "auto" | "openvgdb" | "igdb" | "tgdb"
   datadir: string
   romDirs: string[]
   games: number
@@ -120,6 +122,8 @@ export interface Settings {
   openvgdbPath: string
   igdbClientId: string
   igdbClientSecretSet: boolean
+  tgdbKeySet: boolean
+  metadataPreference: string // "auto" | "openvgdb" | "igdb" | "tgdb"
 }
 
 export interface PlayResolved {

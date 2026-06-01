@@ -32,6 +32,11 @@ type Platform struct {
 	// doesn't cover (PS2, Dreamcast, Wii, Neo Geo).
 	IGDBID int `json:"igdbId"`
 
+	// TGDBID is the platform id at api.thegamesdb.net/v1/Platforms.
+	// Alternative metadata source — useful when IGDB isn't configured
+	// (Twitch dev account hassle).
+	TGDBID int `json:"tgdbId"`
+
 	// LibretroThumbsName is the folder under https://thumbnails.libretro.com
 	// that hosts box art for this system (e.g. "Nintendo - Super Nintendo
 	// Entertainment System"). Empty when there's no matching repo.
@@ -66,38 +71,38 @@ type Platform struct {
 // the repo folder names at https://github.com/libretro-thumbnails.
 var catalog = []Platform{
 	// --- Nintendo ---
-	{ID: "nes", Name: "Nintendo (NES)", OpenVGDBID: 25, IGDBID: 18, LibretroThumbsName: "Nintendo - Nintendo Entertainment System", Exts: []string{".nes", ".fds", ".unf"}, Core: "nestopia", Aliases: []string{"famicom", "fc"}},
-	{ID: "snes", Name: "Super Nintendo", OpenVGDBID: 26, IGDBID: 19, LibretroThumbsName: "Nintendo - Super Nintendo Entertainment System", Exts: []string{".sfc", ".smc"}, Core: "snes9x", Aliases: []string{"superfamicom", "sfc", "super nintendo"}},
-	{ID: "n64", Name: "Nintendo 64", OpenVGDBID: 23, IGDBID: 4, LibretroThumbsName: "Nintendo - Nintendo 64", Exts: []string{".n64", ".z64", ".v64"}, Core: "mupen64plus_next", Aliases: []string{"nintendo64"}},
-	{ID: "gb", Name: "Game Boy", OpenVGDBID: 19, IGDBID: 33, LibretroThumbsName: "Nintendo - Game Boy", Exts: []string{".gb"}, Core: "gambatte", Aliases: []string{"gameboy"}},
-	{ID: "gbc", Name: "Game Boy Color", OpenVGDBID: 21, IGDBID: 22, LibretroThumbsName: "Nintendo - Game Boy Color", Exts: []string{".gbc"}, Core: "gambatte", Aliases: []string{"gameboycolor"}},
-	{ID: "gba", Name: "Game Boy Advance", OpenVGDBID: 20, IGDBID: 24, LibretroThumbsName: "Nintendo - Game Boy Advance", Exts: []string{".gba", ".srl"}, Core: "mgba", Aliases: []string{"gameboyadvance", "advance"}},
-	{ID: "nds", Name: "Nintendo DS", OpenVGDBID: 24, IGDBID: 20, LibretroThumbsName: "Nintendo - Nintendo DS", Exts: []string{".nds"}, Core: "melonds", Aliases: []string{"ds", "ndsi"}},
-	{ID: "gamecube", Name: "GameCube", OpenVGDBID: 22, IGDBID: 21, LibretroThumbsName: "Nintendo - GameCube", Exts: []string{".rvz", ".gcm", ".gcz"}, Core: "dolphin", Standalone: "dolphin", Aliases: []string{"gc", "ngc", "cube"}},
-	{ID: "wii", Name: "Nintendo Wii", OpenVGDBID: 28, IGDBID: 5, Exts: []string{".wbfs", ".wad"}, Core: "dolphin", Standalone: "dolphin", Aliases: []string{"nintendowii"}},
+	{ID: "nes", Name: "Nintendo (NES)", OpenVGDBID: 25, IGDBID: 18, TGDBID: 7, LibretroThumbsName: "Nintendo - Nintendo Entertainment System", Exts: []string{".nes", ".fds", ".unf"}, Core: "nestopia", Aliases: []string{"famicom", "fc"}},
+	{ID: "snes", Name: "Super Nintendo", OpenVGDBID: 26, IGDBID: 19, TGDBID: 6, LibretroThumbsName: "Nintendo - Super Nintendo Entertainment System", Exts: []string{".sfc", ".smc"}, Core: "snes9x", Aliases: []string{"superfamicom", "sfc", "super nintendo"}},
+	{ID: "n64", Name: "Nintendo 64", OpenVGDBID: 23, IGDBID: 4, TGDBID: 3, LibretroThumbsName: "Nintendo - Nintendo 64", Exts: []string{".n64", ".z64", ".v64"}, Core: "mupen64plus_next", Aliases: []string{"nintendo64"}},
+	{ID: "gb", Name: "Game Boy", OpenVGDBID: 19, IGDBID: 33, TGDBID: 4, LibretroThumbsName: "Nintendo - Game Boy", Exts: []string{".gb"}, Core: "gambatte", Aliases: []string{"gameboy"}},
+	{ID: "gbc", Name: "Game Boy Color", OpenVGDBID: 21, IGDBID: 22, TGDBID: 41, LibretroThumbsName: "Nintendo - Game Boy Color", Exts: []string{".gbc"}, Core: "gambatte", Aliases: []string{"gameboycolor"}},
+	{ID: "gba", Name: "Game Boy Advance", OpenVGDBID: 20, IGDBID: 24, TGDBID: 5, LibretroThumbsName: "Nintendo - Game Boy Advance", Exts: []string{".gba", ".srl"}, Core: "mgba", Aliases: []string{"gameboyadvance", "advance"}},
+	{ID: "nds", Name: "Nintendo DS", OpenVGDBID: 24, IGDBID: 20, TGDBID: 8, LibretroThumbsName: "Nintendo - Nintendo DS", Exts: []string{".nds"}, Core: "melonds", Aliases: []string{"ds", "ndsi"}},
+	{ID: "gamecube", Name: "GameCube", OpenVGDBID: 22, IGDBID: 21, TGDBID: 2, LibretroThumbsName: "Nintendo - GameCube", Exts: []string{".rvz", ".gcm", ".gcz"}, Core: "dolphin", Standalone: "dolphin", Aliases: []string{"gc", "ngc", "cube"}},
+	{ID: "wii", Name: "Nintendo Wii", OpenVGDBID: 28, IGDBID: 5, TGDBID: 9, Exts: []string{".wbfs", ".wad"}, Core: "dolphin", Standalone: "dolphin", Aliases: []string{"nintendowii"}},
 
 	// --- Sega ---
-	{ID: "mastersystem", Name: "Master System", OpenVGDBID: 31, IGDBID: 64, LibretroThumbsName: "Sega - Master System - Mark III", Exts: []string{".sms"}, Core: "genesis_plus_gx", Aliases: []string{"sms", "sega master system"}},
-	{ID: "megadrive", Name: "Mega Drive / Genesis", OpenVGDBID: 33, IGDBID: 29, LibretroThumbsName: "Sega - Mega Drive - Genesis", Exts: []string{".md", ".gen", ".smd"}, Core: "genesis_plus_gx", Aliases: []string{"genesis", "megadrive", "mega drive", "sega genesis"}},
-	{ID: "gamegear", Name: "Game Gear", OpenVGDBID: 30, IGDBID: 35, LibretroThumbsName: "Sega - Game Gear", Exts: []string{".gg"}, Core: "genesis_plus_gx", Aliases: []string{"gg", "gamegear"}},
-	{ID: "sega32x", Name: "Sega 32X", OpenVGDBID: 29, IGDBID: 30, LibretroThumbsName: "Sega - 32X", Exts: []string{".32x"}, Core: "picodrive", Aliases: []string{"32x"}},
-	{ID: "saturn", Name: "Sega Saturn", OpenVGDBID: 34, IGDBID: 32, LibretroThumbsName: "Sega - Saturn", Exts: []string{}, Core: "mednafen_saturn", Aliases: []string{"segasaturn"}},
-	{ID: "dreamcast", Name: "Dreamcast", IGDBID: 23, LibretroThumbsName: "Sega - Dreamcast", Exts: []string{".gdi", ".cdi"}, Core: "flycast", Aliases: []string{"dc", "segadreamcast"}},
+	{ID: "mastersystem", Name: "Master System", OpenVGDBID: 31, IGDBID: 64, TGDBID: 35, LibretroThumbsName: "Sega - Master System - Mark III", Exts: []string{".sms"}, Core: "genesis_plus_gx", Aliases: []string{"sms", "sega master system"}},
+	{ID: "megadrive", Name: "Mega Drive / Genesis", OpenVGDBID: 33, IGDBID: 29, TGDBID: 36, LibretroThumbsName: "Sega - Mega Drive - Genesis", Exts: []string{".md", ".gen", ".smd"}, Core: "genesis_plus_gx", Aliases: []string{"genesis", "megadrive", "mega drive", "sega genesis"}},
+	{ID: "gamegear", Name: "Game Gear", OpenVGDBID: 30, IGDBID: 35, TGDBID: 20, LibretroThumbsName: "Sega - Game Gear", Exts: []string{".gg"}, Core: "genesis_plus_gx", Aliases: []string{"gg", "gamegear"}},
+	{ID: "sega32x", Name: "Sega 32X", OpenVGDBID: 29, IGDBID: 30, TGDBID: 33, LibretroThumbsName: "Sega - 32X", Exts: []string{".32x"}, Core: "picodrive", Aliases: []string{"32x"}},
+	{ID: "saturn", Name: "Sega Saturn", OpenVGDBID: 34, IGDBID: 32, TGDBID: 17, LibretroThumbsName: "Sega - Saturn", Exts: []string{}, Core: "mednafen_saturn", Aliases: []string{"segasaturn"}},
+	{ID: "dreamcast", Name: "Dreamcast", IGDBID: 23, TGDBID: 16, LibretroThumbsName: "Sega - Dreamcast", Exts: []string{".gdi", ".cdi"}, Core: "flycast", Aliases: []string{"dc", "segadreamcast"}},
 
 	// --- Sony ---
-	{ID: "psx", Name: "PlayStation", OpenVGDBID: 38, IGDBID: 7, LibretroThumbsName: "Sony - PlayStation", Exts: []string{".pbp"}, Core: "swanstation", Aliases: []string{"ps1", "psone", "playstation", "psxe"}},
-	{ID: "ps2", Name: "PlayStation 2", IGDBID: 8, Exts: []string{}, Standalone: "pcsx2", Aliases: []string{"ps2", "playstation2"}},
-	{ID: "psp", Name: "PlayStation Portable", OpenVGDBID: 39, IGDBID: 38, LibretroThumbsName: "Sony - PlayStation Portable", Exts: []string{".cso"}, Core: "ppsspp", Standalone: "ppsspp", Aliases: []string{"psp", "playstationportable"}},
+	{ID: "psx", Name: "PlayStation", OpenVGDBID: 38, IGDBID: 7, TGDBID: 10, LibretroThumbsName: "Sony - PlayStation", Exts: []string{".pbp"}, Core: "swanstation", Aliases: []string{"ps1", "psone", "playstation", "psxe"}},
+	{ID: "ps2", Name: "PlayStation 2", IGDBID: 8, TGDBID: 11, Exts: []string{}, Standalone: "pcsx2", Aliases: []string{"ps2", "playstation2"}},
+	{ID: "psp", Name: "PlayStation Portable", OpenVGDBID: 39, IGDBID: 38, TGDBID: 13, LibretroThumbsName: "Sony - PlayStation Portable", Exts: []string{".cso"}, Core: "ppsspp", Standalone: "ppsspp", Aliases: []string{"psp", "playstationportable"}},
 
 	// --- NEC / SNK / Atari / Bandai ---
-	{ID: "pcengine", Name: "PC Engine / TurboGrafx-16", OpenVGDBID: 14, IGDBID: 86, LibretroThumbsName: "NEC - PC Engine - TurboGrafx 16", Exts: []string{".pce"}, Core: "mednafen_pce", Aliases: []string{"turbografx", "tg16", "pcengine"}},
-	{ID: "neogeo", Name: "Neo Geo", IGDBID: 80, LibretroThumbsName: "SNK - Neo Geo", Exts: []string{".neo"}, Core: "fbneo", Aliases: []string{"neogeo", "aes", "mvs"}},
-	{ID: "ngp", Name: "Neo Geo Pocket", OpenVGDBID: 36, IGDBID: 119, LibretroThumbsName: "SNK - Neo Geo Pocket", Exts: []string{".ngp", ".ngc"}, Core: "mednafen_ngp", Aliases: []string{"neogeopocket"}},
-	{ID: "atari2600", Name: "Atari 2600", OpenVGDBID: 3, IGDBID: 59, LibretroThumbsName: "Atari - 2600", Exts: []string{".a26"}, Core: "stella", Aliases: []string{"atari", "2600", "vcs"}},
-	{ID: "atari7800", Name: "Atari 7800", OpenVGDBID: 5, IGDBID: 60, LibretroThumbsName: "Atari - 7800", Exts: []string{".a78"}, Core: "prosystem", Aliases: []string{"7800"}},
-	{ID: "lynx", Name: "Atari Lynx", OpenVGDBID: 6, IGDBID: 61, LibretroThumbsName: "Atari - Lynx", Exts: []string{".lnx"}, Core: "handy", Aliases: []string{"atarilynx"}},
-	{ID: "wonderswan", Name: "WonderSwan", OpenVGDBID: 9, IGDBID: 57, LibretroThumbsName: "Bandai - WonderSwan", Exts: []string{".ws", ".wsc"}, Core: "mednafen_wswan", Aliases: []string{"swan"}},
-	{ID: "arcade", Name: "Arcade (MAME)", OpenVGDBID: 2, IGDBID: 52, Exts: []string{}, Core: "mame2003_plus", Aliases: []string{"mame", "fbneo", "fba", "coin-op"}},
+	{ID: "pcengine", Name: "PC Engine / TurboGrafx-16", OpenVGDBID: 14, IGDBID: 86, TGDBID: 34, LibretroThumbsName: "NEC - PC Engine - TurboGrafx 16", Exts: []string{".pce"}, Core: "mednafen_pce", Aliases: []string{"turbografx", "tg16", "pcengine"}},
+	{ID: "neogeo", Name: "Neo Geo", IGDBID: 80, TGDBID: 24, LibretroThumbsName: "SNK - Neo Geo", Exts: []string{".neo"}, Core: "fbneo", Aliases: []string{"neogeo", "aes", "mvs"}},
+	{ID: "ngp", Name: "Neo Geo Pocket", OpenVGDBID: 36, IGDBID: 119, TGDBID: 25, LibretroThumbsName: "SNK - Neo Geo Pocket", Exts: []string{".ngp", ".ngc"}, Core: "mednafen_ngp", Aliases: []string{"neogeopocket"}},
+	{ID: "atari2600", Name: "Atari 2600", OpenVGDBID: 3, IGDBID: 59, TGDBID: 22, LibretroThumbsName: "Atari - 2600", Exts: []string{".a26"}, Core: "stella", Aliases: []string{"atari", "2600", "vcs"}},
+	{ID: "atari7800", Name: "Atari 7800", OpenVGDBID: 5, IGDBID: 60, TGDBID: 27, LibretroThumbsName: "Atari - 7800", Exts: []string{".a78"}, Core: "prosystem", Aliases: []string{"7800"}},
+	{ID: "lynx", Name: "Atari Lynx", OpenVGDBID: 6, IGDBID: 61, TGDBID: 4924, LibretroThumbsName: "Atari - Lynx", Exts: []string{".lnx"}, Core: "handy", Aliases: []string{"atarilynx"}},
+	{ID: "wonderswan", Name: "WonderSwan", OpenVGDBID: 9, IGDBID: 57, TGDBID: 4925, LibretroThumbsName: "Bandai - WonderSwan", Exts: []string{".ws", ".wsc"}, Core: "mednafen_wswan", Aliases: []string{"swan"}},
+	{ID: "arcade", Name: "Arcade (MAME)", OpenVGDBID: 2, IGDBID: 52, TGDBID: 23, Exts: []string{}, Core: "mame2003_plus", Aliases: []string{"mame", "fbneo", "fba", "coin-op"}},
 }
 
 // ambiguousExts are disc/archive extensions shared by several systems.

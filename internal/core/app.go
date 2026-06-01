@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"retrox/internal/openvgdb"
 	"retrox/internal/scanner"
 	"retrox/internal/sources"
+	"retrox/internal/tgdb"
 )
 
 // App is the singleton wiring container handed to every HTTP handler so
@@ -27,6 +29,7 @@ type App struct {
 	Database  *db.Database
 	OpenVGDB  *openvgdb.Store
 	IGDB      *igdb.Client
+	TGDB      *tgdb.Client
 	Thumbs    *libretrothumbs.Client
 	Metadata  *metadata.Provider
 	Downloads *download.Manager
@@ -43,12 +46,14 @@ type App struct {
 // Setting keys — the admin UI overrides the env-var defaults by writing
 // these into the settings table. Env vars remain the boot fallback.
 const (
-	SettingROMDirs           = "rom_dirs" // ':'-separated
-	SettingRetroArchBin      = "retroarch_bin"
-	SettingRetroArchCores    = "retroarch_cores"
-	SettingOpenVGDBPath      = "openvgdb_path"
-	SettingIGDBClientID      = "igdb_client_id"
-	SettingIGDBClientSecret  = "igdb_client_secret"
+	SettingROMDirs            = "rom_dirs" // ':'-separated
+	SettingRetroArchBin       = "retroarch_bin"
+	SettingRetroArchCores     = "retroarch_cores"
+	SettingOpenVGDBPath       = "openvgdb_path"
+	SettingIGDBClientID       = "igdb_client_id"
+	SettingIGDBClientSecret   = "igdb_client_secret"
+	SettingTGDBKey            = "tgdb_key"
+	SettingMetadataPreference = "metadata_preference"
 )
 
 func New() (*App, error) {
@@ -83,12 +88,17 @@ func New() (*App, error) {
 	if cfg.Metadata.IGDBClientID != "" && cfg.Metadata.IGDBClientSecret != "" {
 		igdbClient.SetCredentials(cfg.Metadata.IGDBClientID, cfg.Metadata.IGDBClientSecret)
 	}
+	tgdbClient := tgdb.New()
+	if cfg.Metadata.TGDBKey != "" {
+		tgdbClient.SetCredentials(cfg.Metadata.TGDBKey)
+	}
 
 	app := &App{
 		Config:   cfg,
 		Database: database,
 		OpenVGDB: store,
 		IGDB:     igdbClient,
+		TGDB:     tgdbClient,
 		Thumbs:   thumbs,
 		Metadata: metadata.New(store, thumbs),
 		Sources: []sources.Source{
@@ -207,6 +217,34 @@ func (a *App) ApplyIGDBCredentials(clientID, clientSecret string) error {
 	return nil
 }
 
+// ApplyTGDBKey persists + hot-swaps the TheGamesDB API key.
+func (a *App) ApplyTGDBKey(key string) error {
+	if err := a.Database.SetSetting(SettingTGDBKey, key); err != nil {
+		return err
+	}
+	a.Config.Metadata.TGDBKey = key
+	a.TGDB.SetCredentials(key)
+	return nil
+}
+
+// ApplyMetadataPreference picks which catalogue backend wins when more
+// than one is configured. Values: "auto" | "openvgdb" | "igdb" | "tgdb".
+func (a *App) ApplyMetadataPreference(pref string) error {
+	switch pref {
+	case "", "auto", "openvgdb", "igdb", "tgdb":
+	default:
+		return fmt.Errorf("préférence invalide %q", pref)
+	}
+	if pref == "" {
+		pref = "auto"
+	}
+	if err := a.Database.SetSetting(SettingMetadataPreference, pref); err != nil {
+		return err
+	}
+	a.Config.Metadata.Preference = pref
+	return nil
+}
+
 // DownloadOpenVGDB fetches the upstream SQLite zip, extracts it, and
 // re-opens the store. Triggered from the settings UI; safe to call
 // repeatedly to refresh.
@@ -247,6 +285,7 @@ func overlaySettingsOnto(database *db.Database, cfg *Config) {
 	rows, err := database.GetSettings([]string{
 		SettingROMDirs, SettingRetroArchBin, SettingRetroArchCores,
 		SettingOpenVGDBPath, SettingIGDBClientID, SettingIGDBClientSecret,
+		SettingTGDBKey, SettingMetadataPreference,
 	})
 	if err != nil {
 		return
@@ -274,5 +313,11 @@ func overlaySettingsOnto(database *db.Database, cfg *Config) {
 	}
 	if v := rows[SettingIGDBClientSecret]; v != "" {
 		cfg.Metadata.IGDBClientSecret = v
+	}
+	if v := rows[SettingTGDBKey]; v != "" {
+		cfg.Metadata.TGDBKey = v
+	}
+	if v := rows[SettingMetadataPreference]; v != "" {
+		cfg.Metadata.Preference = v
 	}
 }
