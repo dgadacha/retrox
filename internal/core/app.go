@@ -101,6 +101,7 @@ func New() (*App, error) {
 	}
 
 	thumbs := libretrothumbs.NewClient()
+	libretrothumbs.SetCacheDir(filepath.Join(cfg.Data.Dir, "libretroCache"))
 	igdbClient := igdb.New()
 	if cfg.Metadata.IGDBClientID != "" && cfg.Metadata.IGDBClientSecret != "" {
 		igdbClient.SetCredentials(cfg.Metadata.IGDBClientID, cfg.Metadata.IGDBClientSecret)

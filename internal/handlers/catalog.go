@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"retrox/internal/igdb"
-	"retrox/internal/libretrothumbs"
 	"retrox/internal/openvgdb"
 	"retrox/internal/platforms"
 	"retrox/internal/rawg"
@@ -201,28 +200,53 @@ func (h *Handler) HandleCatalogPlatforms(c echo.Context) error {
 		}
 	}
 
-	out := make([]platformTile, 0, 30)
-	for _, p := range platforms.All() {
+	// Fan out the per-platform counts in parallel — 25 sequential RAWG
+	// requests were ~5-10 s end-to-end; in parallel they finish in
+	// ~one round-trip (~500 ms).
+	type slot struct {
+		tile platformTile
+		ok   bool
+	}
+	all := platforms.All()
+	slots := make([]slot, len(all))
+	var wg sync.WaitGroup
+	for i, p := range all {
+		i, p := i, p
 		src := h.pickSource(p)
 		if src == "" {
 			continue
 		}
-		var n int
-		switch src {
-		case sourceRAWG:
-			id := h.rawgPlatformID(ctx, p.ID)
-			if id > 0 {
-				n, _ = h.App.RAWG.CountByPlatform(ctx, id)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var n int
+			switch src {
+			case sourceRAWG:
+				id := h.rawgPlatformID(ctx, p.ID)
+				if id > 0 {
+					n, _ = h.App.RAWG.CountByPlatform(ctx, id)
+				}
+			case sourceIGDB:
+				n, _ = h.App.IGDB.CountByPlatform(ctx, p.IGDBID)
+			case sourceTGDB:
+				n, _ = h.App.TGDB.CountByPlatform(ctx, p.TGDBID)
+			case sourceOVGDB:
+				n = ovgdbCounts[p.OpenVGDBID]
 			}
-		case sourceIGDB:
-			n, _ = h.App.IGDB.CountByPlatform(ctx, p.IGDBID)
-		case sourceTGDB:
-			n, _ = h.App.TGDB.CountByPlatform(ctx, p.TGDBID)
-		case sourceOVGDB:
-			n = ovgdbCounts[p.OpenVGDBID]
-		}
-		if n > 0 {
-			out = append(out, platformTile{ID: p.ID, Name: p.Name, Source: src, Count: n})
+			if n > 0 {
+				slots[i] = slot{
+					tile: platformTile{ID: p.ID, Name: p.Name, Source: src, Count: n},
+					ok:   true,
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	out := make([]platformTile, 0, len(slots))
+	for _, s := range slots {
+		if s.ok {
+			out = append(out, s.tile)
 		}
 	}
 
@@ -481,7 +505,7 @@ func (h *Handler) HandleCatalogCover(c echo.Context) error {
 		d.PlatformID = p
 	}
 
-	candidates := h.coverCandidates(d)
+	candidates := h.coverCandidates(c.Request().Context(), d)
 	if len(candidates) == 0 {
 		return RespondErr(c, http.StatusNotFound, "pas de jaquette")
 	}
@@ -503,16 +527,15 @@ func (h *Handler) HandleCatalogCover(c echo.Context) error {
 }
 
 // coverCandidates returns the ordered URLs to try when fetching the
-// box art for one release — libretro-thumbnails first when available,
-// then whatever the source backend handed us.
-func (h *Handler) coverCandidates(d *taggedReleaseDetail) []string {
+// box art for one release. libretro-thumbnails is matched against the
+// cached file listing (fuzzy on canonical title — strips region/rev
+// tags), giving near-100 % hit-rate for No-Intro titles, then we fall
+// back to whatever URL the source backend handed us.
+func (h *Handler) coverCandidates(ctx context.Context, d *taggedReleaseDetail) []string {
 	var urls []string
 	if d.PlatformID != "" {
 		if p, ok := platforms.ByID(d.PlatformID); ok && p.LibretroThumbsName != "" {
-			// libretrothumbs.URL strips the file extension off the
-			// "filename" parameter and percent-encodes — passing
-			// "<title>.png" gives us the canonical Named_Boxarts URL.
-			if u := libretrothumbs.URL(p.LibretroThumbsName, d.Title+".png", libretrothumbs.Boxart); u != "" {
+			if u := h.App.Thumbs.MatchBoxart(ctx, p.LibretroThumbsName, d.Title); u != "" {
 				urls = append(urls, u)
 			}
 		}
