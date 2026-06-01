@@ -82,7 +82,7 @@ function PlatformPicker() {
       <header className="sticky top-0 z-10 border-b border-ink-700 bg-ink-950/85 px-6 py-5 backdrop-blur lg:px-10">
         <h1 className="text-2xl font-bold tracking-tight">Catalogue</h1>
         <p className="mt-1 text-xs text-text-500">
-          Choisis une plateforme pour parcourir les jeux référencés dans OpenVGDB.
+          Choisis une plateforme pour parcourir les jeux disponibles.
         </p>
       </header>
 
@@ -208,7 +208,7 @@ function GamesView({
           <h1 className="text-2xl font-bold tracking-tight">{platformName}</h1>
           <p className="mt-1 text-xs text-text-500">
             {catalogQ.data
-              ? `${catalogQ.data.total.toLocaleString("fr")} jeux dans OpenVGDB`
+              ? `${catalogQ.data.total.toLocaleString("fr")} jeux`
               : "—"}
           </p>
         </div>
@@ -330,7 +330,7 @@ function CatalogueCard({ r }: { r: CatalogRelease }) {
     >
       {showImage ? (
         <img
-          src={catalogCover(r.releaseId)}
+          src={catalogCover(r.releaseId, r.platformId)}
           alt={r.title}
           loading="lazy"
           onError={() => setFailed(true)}

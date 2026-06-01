@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"retrox/internal/igdb"
+	"retrox/internal/libretrothumbs"
 	"retrox/internal/openvgdb"
 	"retrox/internal/platforms"
 	"retrox/internal/rawg"
@@ -443,36 +444,83 @@ func (h *Handler) HandleCatalogGet(c echo.Context) error {
 	return RespondOK(c, d)
 }
 
-// HandleCatalogCover proxies the per-release cover regardless of source.
-// OpenVGDB: gamefaqs hotlink (needs browser UA); IGDB: images.igdb.com
-// (no Cloudflare). Both get the same disk cache treatment.
+// HandleCatalogCover serves the per-release cover with an aggressive
+// fall-back chain so the user gets a real box art whenever one exists:
+//
+//   1. Disk cache (keyed by composite release id)
+//   2. libretro-thumbnails Named_Boxarts — proper box scans for every
+//      platform listed in github.com/libretro-thumbnails. Preferred
+//      over RAWG's `background_image`, which is a gameplay screenshot
+//      rather than a cover.
+//   3. The source's own coverUrl (RAWG screenshot / IGDB cover /
+//      gamefaqs hotlink from OpenVGDB).
+//
+// The first successful fetch is disk-cached so the chain only runs
+// once per release.
 func (h *Handler) HandleCatalogCover(c echo.Context) error {
 	source, idNum, err := parseCompositeID(c.Param("id"))
 	if err != nil {
 		return RespondErr(c, http.StatusBadRequest, err.Error())
 	}
-	d, err := h.getReleaseDetail(c.Request().Context(), source, idNum)
-	if err != nil || d == nil || d.CoverURL == "" {
-		return RespondErr(c, http.StatusNotFound, "pas de jaquette")
-	}
 
 	cacheDir := filepath.Join(h.App.Config.Data.Dir, "imgcache")
-	sum := sha1.Sum([]byte("catalog|" + d.CoverURL))
+	sum := sha1.Sum([]byte("catalog|" + c.Param("id") + "|" + c.QueryParam("platform")))
 	cachePath := filepath.Join(cacheDir, hex.EncodeToString(sum[:]))
 	if body, rerr := os.ReadFile(cachePath); rerr == nil {
 		return c.Blob(http.StatusOK, http.DetectContentType(body), body)
 	}
-	body, contentType, err := fetchBytes(d.CoverURL)
-	if err != nil {
-		return RespondErr(c, http.StatusBadGateway, err.Error())
+
+	d, err := h.getReleaseDetail(c.Request().Context(), source, idNum)
+	if err != nil || d == nil {
+		return RespondErr(c, http.StatusNotFound, "release introuvable")
 	}
-	if mkErr := os.MkdirAll(cacheDir, 0o755); mkErr == nil {
-		_ = os.WriteFile(cachePath, body, 0o644)
+	// The list view knows the platform when it builds the card; pass
+	// it as ?platform=… so we don't lose it for RAWG / IGDB sources
+	// that return their own platform ids in the detail payload.
+	if p := c.QueryParam("platform"); p != "" {
+		d.PlatformID = p
 	}
-	if contentType == "" {
-		contentType = http.DetectContentType(body)
+
+	candidates := h.coverCandidates(d)
+	if len(candidates) == 0 {
+		return RespondErr(c, http.StatusNotFound, "pas de jaquette")
 	}
-	return c.Blob(http.StatusOK, contentType, body)
+
+	for _, url := range candidates {
+		body, contentType, ferr := fetchBytes(url)
+		if ferr != nil || len(body) == 0 {
+			continue
+		}
+		if mkErr := os.MkdirAll(cacheDir, 0o755); mkErr == nil {
+			_ = os.WriteFile(cachePath, body, 0o644)
+		}
+		if contentType == "" {
+			contentType = http.DetectContentType(body)
+		}
+		return c.Blob(http.StatusOK, contentType, body)
+	}
+	return RespondErr(c, http.StatusNotFound, "pas de jaquette disponible")
+}
+
+// coverCandidates returns the ordered URLs to try when fetching the
+// box art for one release — libretro-thumbnails first when available,
+// then whatever the source backend handed us.
+func (h *Handler) coverCandidates(d *taggedReleaseDetail) []string {
+	var urls []string
+	if d.PlatformID != "" {
+		if p, ok := platforms.ByID(d.PlatformID); ok && p.LibretroThumbsName != "" {
+			// libretrothumbs.URL strips the file extension off the
+			// "filename" parameter and percent-encodes — passing
+			// "<title>.png" gives us the canonical Named_Boxarts URL.
+			if u := libretrothumbs.URL(p.LibretroThumbsName, d.Title+".png", libretrothumbs.Boxart); u != "" {
+				urls = append(urls, u)
+			}
+		}
+	}
+	if d.CoverURL != "" {
+		urls = append(urls, d.CoverURL)
+	}
+	return urls
 }
 
 // HandleCatalogSources fans the title across every registered Source.

@@ -136,7 +136,7 @@ function Hero({ release }: { release: CatalogReleaseDetail }) {
     <div className="relative h-72 w-full overflow-hidden bg-ink-900 sm:h-96">
       {release.coverUrl && !failed ? (
         <img
-          src={catalogCover(release.releaseId)}
+          src={catalogCover(release.releaseId, release.platformId)}
           alt=""
           onError={() => setFailed(true)}
           className="h-full w-full scale-105 object-cover blur-[1px]"
@@ -173,7 +173,7 @@ function Cover({ release }: { release: CatalogReleaseDetail }) {
   }
   return (
     <img
-      src={catalogCover(release.releaseId)}
+      src={catalogCover(release.releaseId, release.platformId)}
       alt={release.title}
       onError={() => setFailed(true)}
       className="aspect-[3/4] w-36 shrink-0 rounded-xl object-cover shadow-card ring-1 ring-white/10 sm:w-44"

@@ -130,8 +130,13 @@ export const api = {
     }),
 }
 
-export function catalogCover(releaseId: string): string {
-  return `${BASE}/catalog/${encodeURIComponent(releaseId)}/cover`
+// catalogCover builds the proxy URL for a release's box art. Pass the
+// platformId so the backend can try libretro-thumbnails (proper box
+// scans) before falling back to the source's own image (which for
+// RAWG is a gameplay screenshot, not a cover).
+export function catalogCover(releaseId: string, platformId?: string): string {
+  const suffix = platformId ? `?platform=${encodeURIComponent(platformId)}` : ""
+  return `${BASE}/catalog/${encodeURIComponent(releaseId)}/cover${suffix}`
 }
 
 export type ImageKind = "cover" | "screenshot"
