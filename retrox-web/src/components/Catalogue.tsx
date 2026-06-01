@@ -3,7 +3,7 @@ import { ArrowLeft, Gamepad2, Search } from "lucide-react"
 import { useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 
-import { Button, Spinner, inputClass } from "@/components/ui"
+import { Button, inputClass } from "@/components/ui"
 import { api, catalogCover } from "@/lib/api"
 import type { CatalogPlatform, CatalogRelease } from "@/lib/types"
 
@@ -88,8 +88,10 @@ function PlatformPicker() {
 
       <div className="flex-1 px-6 py-8 lg:px-10">
         {platsQ.isLoading && (
-          <div className="grid h-40 place-items-center">
-            <Spinner className="h-6 w-6" />
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            {Array.from({ length: 18 }).map((_, i) => (
+              <PlatformTileSkeleton key={i} />
+            ))}
           </div>
         )}
         {platsQ.isError && (
@@ -104,6 +106,21 @@ function PlatformPicker() {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// Skeleton placeholder that mirrors the PlatformTile layout so the
+// page doesn't reflow when real data lands.
+function PlatformTileSkeleton() {
+  return (
+    <div className="flex animate-pulse flex-col overflow-hidden rounded-xl bg-ink-800 ring-1 ring-inset ring-white/5">
+      <span className="block h-0.5 w-full bg-ink-700" />
+      <div className="h-32 bg-zinc-200/5" />
+      <div className="flex items-center justify-between gap-2 px-4 py-3">
+        <div className="h-3 w-24 rounded bg-ink-700" />
+        <div className="h-3 w-10 rounded bg-ink-700" />
       </div>
     </div>
   )
@@ -248,8 +265,10 @@ function CatalogueResults({
 
   if (isLoading && !data) {
     return (
-      <div className="grid h-40 place-items-center">
-        <Spinner className="h-6 w-6" />
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
+        {Array.from({ length: 24 }).map((_, i) => (
+          <GameCardSkeleton key={i} />
+        ))}
       </div>
     )
   }
@@ -290,6 +309,12 @@ function CatalogueResults({
         </Button>
       </div>
     </div>
+  )
+}
+
+function GameCardSkeleton() {
+  return (
+    <div className="aspect-[3/4] animate-pulse overflow-hidden rounded-lg bg-ink-800 ring-1 ring-inset ring-white/5" />
   )
 }
 

@@ -7,6 +7,7 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"retrox/internal/database/db"
 	"retrox/internal/database/models"
@@ -43,7 +44,20 @@ type App struct {
 	// the UI: favorites and history belong to this single instance-wide
 	// profile (the multi-profile model survives in the DB but is unused).
 	defaultProfileUID string
+
+	// settingsVersion bumps every time a metadata source's credentials
+	// or the user preference changes. The catalogue platforms cache
+	// uses it as part of its key, so a settings change invalidates the
+	// cache without core having to know handlers exists.
+	settingsVersion atomic.Int64
 }
+
+// SettingsVersion returns the monotonic version counter that bumps on
+// every credential / preference change. Handlers that cache
+// preference-dependent state use it as a cache key component.
+func (a *App) SettingsVersion() int64 { return a.settingsVersion.Load() }
+
+func (a *App) bumpSettings() { a.settingsVersion.Add(1) }
 
 // Setting keys — the admin UI overrides the env-var defaults by writing
 // these into the settings table. Env vars remain the boot fallback.
@@ -222,6 +236,7 @@ func (a *App) ApplyIGDBCredentials(clientID, clientSecret string) error {
 	a.Config.Metadata.IGDBClientID = clientID
 	a.Config.Metadata.IGDBClientSecret = clientSecret
 	a.IGDB.SetCredentials(clientID, clientSecret)
+	a.bumpSettings()
 	return nil
 }
 
@@ -232,6 +247,7 @@ func (a *App) ApplyTGDBKey(key string) error {
 	}
 	a.Config.Metadata.TGDBKey = key
 	a.TGDB.SetCredentials(key)
+	a.bumpSettings()
 	return nil
 }
 
@@ -242,6 +258,7 @@ func (a *App) ApplyRAWGKey(key string) error {
 	}
 	a.Config.Metadata.RAWGKey = key
 	a.RAWG.SetCredentials(key)
+	a.bumpSettings()
 	return nil
 }
 
@@ -260,6 +277,7 @@ func (a *App) ApplyMetadataPreference(pref string) error {
 		return err
 	}
 	a.Config.Metadata.Preference = pref
+	a.bumpSettings()
 	return nil
 }
 

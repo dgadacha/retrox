@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"retrox/internal/igdb"
 	"retrox/internal/openvgdb"
@@ -145,11 +146,45 @@ func (h *Handler) rawgPlatformID(ctx context.Context, ourPlatformID string) int 
 	return id
 }
 
+type platformTile struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Source string `json:"source"`
+	Count  int    `json:"count"`
+}
+
+// platformsCache memoises HandleCatalogPlatforms's response — N HTTP
+// round-trips to RAWG/IGDB/TGDB make a fresh build expensive (1-2s),
+// so we keep the result for 30 min keyed by App.SettingsVersion().
+// A credential/preference change bumps the version → cache miss → fresh
+// data on the very next request, no plumbing across packages needed.
+type platformsCacheEntry struct {
+	version int64
+	tiles   []platformTile
+	at      time.Time
+}
+
+var (
+	platformsCacheMu sync.Mutex
+	platformsCache   *platformsCacheEntry
+)
+
 // HandleCatalogPlatforms returns one tile per RETROX-supported platform
 // that has any metadata available, picking the source per pickSource()
-// (which honours the user's Preference). OpenVGDB counts are
-// pre-loaded once to avoid a per-row round-trip.
+// (which honours the user's Preference). Cached for 30 min keyed by
+// SettingsVersion so creds/preference changes invalidate instantly.
 func (h *Handler) HandleCatalogPlatforms(c echo.Context) error {
+	version := h.App.SettingsVersion()
+	platformsCacheMu.Lock()
+	if platformsCache != nil &&
+		platformsCache.version == version &&
+		time.Since(platformsCache.at) < 30*time.Minute {
+		cached := platformsCache.tiles
+		platformsCacheMu.Unlock()
+		return RespondOK(c, cached)
+	}
+	platformsCacheMu.Unlock()
+
 	ctx := c.Request().Context()
 	ovgdbCounts := map[int]int{}
 	if h.App.OpenVGDB != nil && h.App.OpenVGDB.Ready() {
@@ -165,14 +200,7 @@ func (h *Handler) HandleCatalogPlatforms(c echo.Context) error {
 		}
 	}
 
-	type tile struct {
-		ID     string `json:"id"`
-		Name   string `json:"name"`
-		Source string `json:"source"`
-		Count  int    `json:"count"`
-	}
-	out := make([]tile, 0, 30)
-
+	out := make([]platformTile, 0, 30)
 	for _, p := range platforms.All() {
 		src := h.pickSource(p)
 		if src == "" {
@@ -193,10 +221,13 @@ func (h *Handler) HandleCatalogPlatforms(c echo.Context) error {
 			n = ovgdbCounts[p.OpenVGDBID]
 		}
 		if n > 0 {
-			out = append(out, tile{ID: p.ID, Name: p.Name, Source: src, Count: n})
+			out = append(out, platformTile{ID: p.ID, Name: p.Name, Source: src, Count: n})
 		}
 	}
 
+	platformsCacheMu.Lock()
+	platformsCache = &platformsCacheEntry{version: version, tiles: out, at: time.Now()}
+	platformsCacheMu.Unlock()
 	return RespondOK(c, out)
 }
 
@@ -268,7 +299,7 @@ func (h *Handler) listRAWG(c echo.Context, p platforms.Platform, query string, p
 	items := make([]taggedRelease, 0, len(games))
 	for _, g := range games {
 		items = append(items, taggedRelease{
-			ReleaseID:  fmt.Sprintf("%s:%d", sourceRAWG, g.ID),
+			ReleaseID:  fmt.Sprintf("%s_%d", sourceRAWG, g.ID),
 			Title:      g.Title,
 			CoverURL:   g.CoverURL,
 			PlatformID: p.ID,
@@ -303,7 +334,7 @@ func (h *Handler) listIGDB(c echo.Context, p platforms.Platform, query string, p
 	items := make([]taggedRelease, 0, len(games))
 	for _, g := range games {
 		items = append(items, taggedRelease{
-			ReleaseID:  fmt.Sprintf("%s:%d", sourceIGDB, g.ID),
+			ReleaseID:  fmt.Sprintf("%s_%d", sourceIGDB, g.ID),
 			Title:      g.Name,
 			CoverURL:   g.CoverURL,
 			PlatformID: p.ID,
@@ -338,7 +369,7 @@ func (h *Handler) listTGDB(c echo.Context, p platforms.Platform, query string, p
 	items := make([]taggedRelease, 0, len(games))
 	for _, g := range games {
 		items = append(items, taggedRelease{
-			ReleaseID:  fmt.Sprintf("%s:%d", sourceTGDB, g.ID),
+			ReleaseID:  fmt.Sprintf("%s_%d", sourceTGDB, g.ID),
 			Title:      g.Title,
 			CoverURL:   g.CoverURL,
 			PlatformID: p.ID,
@@ -363,7 +394,7 @@ func (h *Handler) listOpenVGDB(c echo.Context, p platforms.Platform, query strin
 	items := make([]taggedRelease, 0, len(out.Items))
 	for _, r := range out.Items {
 		items = append(items, taggedRelease{
-			ReleaseID:       fmt.Sprintf("%s:%d", sourceOVGDB, r.ReleaseID),
+			ReleaseID:       fmt.Sprintf("%s_%d", sourceOVGDB, r.ReleaseID),
 			Title:           r.Title,
 			CoverURL:        r.CoverURL,
 			SystemShortName: r.SystemShortName,
@@ -496,7 +527,7 @@ func (h *Handler) getReleaseDetail(ctx context.Context, source string, id int) (
 			return nil, err
 		}
 		return &taggedReleaseDetail{
-			ReleaseID:       fmt.Sprintf("%s:%d", sourceOVGDB, r.ReleaseID),
+			ReleaseID:       fmt.Sprintf("%s_%d", sourceOVGDB, r.ReleaseID),
 			Title:           r.Title,
 			CoverURL:        r.CoverURL,
 			BackCoverURL:    r.BackCoverURL,
@@ -523,7 +554,7 @@ func (h *Handler) getReleaseDetail(ctx context.Context, source string, id int) (
 			date = strconv.Itoa(g.FirstYear)
 		}
 		return &taggedReleaseDetail{
-			ReleaseID:   fmt.Sprintf("%s:%d", sourceIGDB, g.ID),
+			ReleaseID:   fmt.Sprintf("%s_%d", sourceIGDB, g.ID),
 			Title:       g.Name,
 			CoverURL:    g.CoverURL,
 			PlatformID:  platformIDFor(0, g.PlatformID, 0),
@@ -542,7 +573,7 @@ func (h *Handler) getReleaseDetail(ctx context.Context, source string, id int) (
 			return nil, err
 		}
 		return &taggedReleaseDetail{
-			ReleaseID:   fmt.Sprintf("%s:%d", sourceTGDB, g.ID),
+			ReleaseID:   fmt.Sprintf("%s_%d", sourceTGDB, g.ID),
 			Title:       g.Title,
 			CoverURL:    g.CoverURL,
 			PlatformID:  platformIDFor(0, 0, g.PlatformID),
@@ -566,7 +597,7 @@ func (h *Handler) getReleaseDetail(ctx context.Context, source string, id int) (
 		// empty; the frontend uses the platformId field carried in
 		// the list response when it was already shown.
 		return &taggedReleaseDetail{
-			ReleaseID:   fmt.Sprintf("%s:%d", sourceRAWG, g.ID),
+			ReleaseID:   fmt.Sprintf("%s_%d", sourceRAWG, g.ID),
 			Title:       g.Title,
 			CoverURL:    g.CoverURL,
 			Description: g.Summary,
@@ -582,9 +613,9 @@ func (h *Handler) getReleaseDetail(ctx context.Context, source string, id int) (
 
 // parseCompositeID splits "ovgdb:42" / "igdb:1942" into its parts.
 func parseCompositeID(s string) (string, int, error) {
-	parts := strings.SplitN(s, ":", 2)
+	parts := strings.SplitN(s, "_", 2)
 	if len(parts) != 2 {
-		return "", 0, errors.New("id invalide (format attendu: <source>:<n>)")
+		return "", 0, errors.New("id invalide (format attendu: <source>_<n>)")
 	}
 	n, err := strconv.Atoi(parts[1])
 	if err != nil {
