@@ -200,15 +200,18 @@ func (h *Handler) HandleCatalogPlatforms(c echo.Context) error {
 		}
 	}
 
-	// Fan out the per-platform counts in parallel — 25 sequential RAWG
-	// requests were ~5-10 s end-to-end; in parallel they finish in
-	// ~one round-trip (~500 ms).
+	// Fan out the per-platform counts with a 4-concurrency cap —
+	// running all 25 in parallel triggers RAWG / GitHub rate limits
+	// and we end up caching a half-empty picker for 30 min. With
+	// 4 in-flight the whole picker still builds in ~1-2 s.
 	type slot struct {
 		tile platformTile
 		ok   bool
+		err  bool
 	}
 	all := platforms.All()
 	slots := make([]slot, len(all))
+	sem := make(chan struct{}, 4)
 	var wg sync.WaitGroup
 	for i, p := range all {
 		i, p := i, p
@@ -219,19 +222,28 @@ func (h *Handler) HandleCatalogPlatforms(c echo.Context) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			var n int
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			var (
+				n   int
+				err error
+			)
 			switch src {
 			case sourceRAWG:
 				id := h.rawgPlatformID(ctx, p.ID)
 				if id > 0 {
-					n, _ = h.App.RAWG.CountByPlatform(ctx, id)
+					n, err = h.App.RAWG.CountByPlatform(ctx, id)
 				}
 			case sourceIGDB:
-				n, _ = h.App.IGDB.CountByPlatform(ctx, p.IGDBID)
+				n, err = h.App.IGDB.CountByPlatform(ctx, p.IGDBID)
 			case sourceTGDB:
-				n, _ = h.App.TGDB.CountByPlatform(ctx, p.TGDBID)
+				n, err = h.App.TGDB.CountByPlatform(ctx, p.TGDBID)
 			case sourceOVGDB:
 				n = ovgdbCounts[p.OpenVGDBID]
+			}
+			if err != nil {
+				slots[i] = slot{err: true}
+				return
 			}
 			if n > 0 {
 				slots[i] = slot{
@@ -243,11 +255,21 @@ func (h *Handler) HandleCatalogPlatforms(c echo.Context) error {
 	}
 	wg.Wait()
 
+	// If any platform errored (likely a transient rate-limit), don't
+	// poison the 30-min cache — return without writing so the next
+	// request rebuilds with fresh data.
+	anyErr := false
 	out := make([]platformTile, 0, len(slots))
 	for _, s := range slots {
+		if s.err {
+			anyErr = true
+		}
 		if s.ok {
 			out = append(out, s.tile)
 		}
+	}
+	if anyErr {
+		return RespondOK(c, out)
 	}
 
 	platformsCacheMu.Lock()
