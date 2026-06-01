@@ -19,6 +19,7 @@ func (h *Handler) HandleGetSettings(c echo.Context) error {
 		"igdbClientId":        cfg.Metadata.IGDBClientID,
 		"igdbClientSecretSet": cfg.Metadata.IGDBClientSecret != "",
 		"tgdbKeySet":          cfg.Metadata.TGDBKey != "",
+		"rawgKeySet":          cfg.Metadata.RAWGKey != "",
 		"metadataPreference":  cfg.Metadata.Preference,
 	})
 }
@@ -47,6 +48,10 @@ type igdbCredsReq struct {
 
 type tgdbKeyReq struct {
 	Key string `json:"key"` // "" = clear
+}
+
+type rawgKeyReq struct {
+	Key string `json:"key"`
 }
 
 type prefReq struct {
@@ -93,6 +98,28 @@ func (h *Handler) HandleSetTGDBKey(c echo.Context) error {
 		if _, err := h.App.TGDB.CountByPlatform(c.Request().Context(), 7); err != nil {
 			return RespondErr(c, http.StatusBadRequest,
 				"clé refusée par TheGamesDB : "+err.Error())
+		}
+	}
+	return h.HandleGetSettings(c)
+}
+
+// HandleSetRAWGKey persists + verifies the RAWG API key by probing a
+// known platform (Nintendo Entertainment System name lookup).
+func (h *Handler) HandleSetRAWGKey(c echo.Context) error {
+	var req rawgKeyReq
+	if err := c.Bind(&req); err != nil {
+		return RespondErr(c, http.StatusBadRequest, "corps de requête invalide")
+	}
+	if err := h.App.ApplyRAWGKey(req.Key); err != nil {
+		return RespondErr(c, http.StatusInternalServerError, err.Error())
+	}
+	if req.Key != "" {
+		// PlatformIDForName triggers the /platforms fetch as a side
+		// effect — round-trips RAWG so we catch a bad key now.
+		if _, err := h.App.RAWG.PlatformIDForName(c.Request().Context(),
+			"Nintendo Entertainment System", "NES"); err != nil {
+			return RespondErr(c, http.StatusBadRequest,
+				"clé refusée par RAWG : "+err.Error())
 		}
 	}
 	return h.HandleGetSettings(c)

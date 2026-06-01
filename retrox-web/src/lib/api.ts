@@ -118,6 +118,11 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input),
     }),
+  setRAWGKey: (input: { key: string }) =>
+    req<Settings>("/metadata/rawg/key", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
   setMetadataPreference: (input: { preference: string }) =>
     req<Settings>("/metadata/preference", {
       method: "PUT",

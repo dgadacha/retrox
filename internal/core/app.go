@@ -16,6 +16,7 @@ import (
 	"retrox/internal/libretrothumbs"
 	"retrox/internal/metadata"
 	"retrox/internal/openvgdb"
+	"retrox/internal/rawg"
 	"retrox/internal/scanner"
 	"retrox/internal/sources"
 	"retrox/internal/tgdb"
@@ -30,6 +31,7 @@ type App struct {
 	OpenVGDB  *openvgdb.Store
 	IGDB      *igdb.Client
 	TGDB      *tgdb.Client
+	RAWG      *rawg.Client
 	Thumbs    *libretrothumbs.Client
 	Metadata  *metadata.Provider
 	Downloads *download.Manager
@@ -53,6 +55,7 @@ const (
 	SettingIGDBClientID       = "igdb_client_id"
 	SettingIGDBClientSecret   = "igdb_client_secret"
 	SettingTGDBKey            = "tgdb_key"
+	SettingRAWGKey            = "rawg_key"
 	SettingMetadataPreference = "metadata_preference"
 )
 
@@ -92,6 +95,10 @@ func New() (*App, error) {
 	if cfg.Metadata.TGDBKey != "" {
 		tgdbClient.SetCredentials(cfg.Metadata.TGDBKey)
 	}
+	rawgClient := rawg.New()
+	if cfg.Metadata.RAWGKey != "" {
+		rawgClient.SetCredentials(cfg.Metadata.RAWGKey)
+	}
 
 	app := &App{
 		Config:   cfg,
@@ -99,6 +106,7 @@ func New() (*App, error) {
 		OpenVGDB: store,
 		IGDB:     igdbClient,
 		TGDB:     tgdbClient,
+		RAWG:     rawgClient,
 		Thumbs:   thumbs,
 		Metadata: metadata.New(store, thumbs),
 		Sources: []sources.Source{
@@ -227,11 +235,21 @@ func (a *App) ApplyTGDBKey(key string) error {
 	return nil
 }
 
+// ApplyRAWGKey persists + hot-swaps the RAWG.io API key.
+func (a *App) ApplyRAWGKey(key string) error {
+	if err := a.Database.SetSetting(SettingRAWGKey, key); err != nil {
+		return err
+	}
+	a.Config.Metadata.RAWGKey = key
+	a.RAWG.SetCredentials(key)
+	return nil
+}
+
 // ApplyMetadataPreference picks which catalogue backend wins when more
-// than one is configured. Values: "auto" | "openvgdb" | "igdb" | "tgdb".
+// than one is configured. Values: "auto" | "openvgdb" | "igdb" | "tgdb" | "rawg".
 func (a *App) ApplyMetadataPreference(pref string) error {
 	switch pref {
-	case "", "auto", "openvgdb", "igdb", "tgdb":
+	case "", "auto", "openvgdb", "igdb", "tgdb", "rawg":
 	default:
 		return fmt.Errorf("préférence invalide %q", pref)
 	}
@@ -285,7 +303,7 @@ func overlaySettingsOnto(database *db.Database, cfg *Config) {
 	rows, err := database.GetSettings([]string{
 		SettingROMDirs, SettingRetroArchBin, SettingRetroArchCores,
 		SettingOpenVGDBPath, SettingIGDBClientID, SettingIGDBClientSecret,
-		SettingTGDBKey, SettingMetadataPreference,
+		SettingTGDBKey, SettingRAWGKey, SettingMetadataPreference,
 	})
 	if err != nil {
 		return
@@ -316,6 +334,9 @@ func overlaySettingsOnto(database *db.Database, cfg *Config) {
 	}
 	if v := rows[SettingTGDBKey]; v != "" {
 		cfg.Metadata.TGDBKey = v
+	}
+	if v := rows[SettingRAWGKey]; v != "" {
+		cfg.Metadata.RAWGKey = v
 	}
 	if v := rows[SettingMetadataPreference]; v != "" {
 		cfg.Metadata.Preference = v

@@ -16,6 +16,7 @@ import (
 	"retrox/internal/igdb"
 	"retrox/internal/openvgdb"
 	"retrox/internal/platforms"
+	"retrox/internal/rawg"
 	"retrox/internal/sources"
 	"retrox/internal/tgdb"
 
@@ -41,7 +42,41 @@ const (
 	sourceOVGDB = "ovgdb"
 	sourceIGDB  = "igdb"
 	sourceTGDB  = "tgdb"
+	sourceRAWG  = "rawg"
 )
+
+// rawgPlatformNames maps our platform id → the RAWG platform name(s)
+// to try when resolving the numeric id at the API. Multiple variants
+// because RAWG isn't always consistent (e.g. "Genesis" vs "Mega
+// Drive"); we walk in order and take the first hit.
+var rawgPlatformNames = map[string][]string{
+	"nes":          {"Nintendo Entertainment System", "NES"},
+	"snes":         {"SNES", "Super Nintendo Entertainment System", "Super Nintendo"},
+	"n64":          {"Nintendo 64"},
+	"gb":           {"Game Boy"},
+	"gbc":          {"Game Boy Color"},
+	"gba":          {"Game Boy Advance"},
+	"nds":          {"Nintendo DS"},
+	"gamecube":     {"GameCube", "Nintendo GameCube"},
+	"wii":          {"Wii", "Nintendo Wii"},
+	"mastersystem": {"SEGA Master System", "Master System"},
+	"megadrive":    {"Genesis", "Sega Genesis", "Mega Drive"},
+	"gamegear":     {"Game Gear"},
+	"sega32x":      {"Sega 32X", "32X"},
+	"saturn":       {"Sega Saturn", "Saturn"},
+	"dreamcast":    {"Dreamcast", "Sega Dreamcast"},
+	"psx":          {"PlayStation"},
+	"ps2":          {"PlayStation 2"},
+	"psp":          {"PlayStation Portable", "PSP"},
+	"pcengine":     {"PC Engine", "TurboGrafx-16"},
+	"neogeo":       {"Neo Geo"},
+	"ngp":          {"Neo Geo Pocket"},
+	"atari2600":    {"Atari 2600"},
+	"atari7800":    {"Atari 7800"},
+	"lynx":         {"Atari Lynx", "Lynx"},
+	"wonderswan":   {"WonderSwan"},
+	"arcade":       {"Arcade"},
+}
 
 // pickSource returns the metadata backend to use for one platform,
 // honoring the user's Preference setting. "auto" walks the preferred
@@ -55,9 +90,15 @@ func (h *Handler) pickSource(p platforms.Platform) string {
 	}
 	igdbReady := h.App.IGDB != nil && h.App.IGDB.Configured()
 	tgdbReady := h.App.TGDB != nil && h.App.TGDB.Configured()
+	rawgReady := h.App.RAWG != nil && h.App.RAWG.Configured()
 	ovgdbReady := h.App.OpenVGDB != nil && h.App.OpenVGDB.Ready()
+	hasRawgName := len(rawgPlatformNames[p.ID]) > 0
 
 	switch pref {
+	case "rawg":
+		if rawgReady && hasRawgName {
+			return sourceRAWG
+		}
 	case "igdb":
 		if igdbReady && p.IGDBID > 0 {
 			return sourceIGDB
@@ -71,6 +112,9 @@ func (h *Handler) pickSource(p platforms.Platform) string {
 			return sourceOVGDB
 		}
 	case "auto":
+		if rawgReady && hasRawgName {
+			return sourceRAWG
+		}
 		if igdbReady && p.IGDBID > 0 {
 			return sourceIGDB
 		}
@@ -82,6 +126,18 @@ func (h *Handler) pickSource(p platforms.Platform) string {
 		}
 	}
 	return ""
+}
+
+// rawgPlatformID resolves our platform's name candidates to RAWG's
+// numeric id, caching nothing (the client itself caches the full
+// /platforms list).
+func (h *Handler) rawgPlatformID(ctx context.Context, ourPlatformID string) int {
+	names := rawgPlatformNames[ourPlatformID]
+	if len(names) == 0 || h.App.RAWG == nil {
+		return 0
+	}
+	id, _ := h.App.RAWG.PlatformIDForName(ctx, names...)
+	return id
 }
 
 // HandleCatalogPlatforms returns one tile per RETROX-supported platform
@@ -119,6 +175,11 @@ func (h *Handler) HandleCatalogPlatforms(c echo.Context) error {
 		}
 		var n int
 		switch src {
+		case sourceRAWG:
+			id := h.rawgPlatformID(ctx, p.ID)
+			if id > 0 {
+				n, _ = h.App.RAWG.CountByPlatform(ctx, id)
+			}
 		case sourceIGDB:
 			n, _ = h.App.IGDB.CountByPlatform(ctx, p.IGDBID)
 		case sourceTGDB:
@@ -161,6 +222,8 @@ func (h *Handler) HandleCatalogList(c echo.Context) error {
 	}
 
 	switch h.pickSource(p) {
+	case sourceRAWG:
+		return h.listRAWG(c, p, query, page)
 	case sourceIGDB:
 		return h.listIGDB(c, p, query, page)
 	case sourceTGDB:
@@ -170,6 +233,46 @@ func (h *Handler) HandleCatalogList(c echo.Context) error {
 	}
 	return RespondErr(c, http.StatusNotFound,
 		"aucune source de métadonnées pour cette plateforme — configurez IGDB ou TheGamesDB dans Réglages")
+}
+
+func (h *Handler) listRAWG(c echo.Context, p platforms.Platform, query string, page int) error {
+	ctx := c.Request().Context()
+	rawgID := h.rawgPlatformID(ctx, p.ID)
+	if rawgID == 0 {
+		return RespondErr(c, http.StatusNotFound, "RAWG ne connaît pas cette plateforme")
+	}
+	var (
+		games []rawg.Game
+		total int
+		err   error
+	)
+	if strings.TrimSpace(query) != "" {
+		games, err = h.App.RAWG.SearchByPlatform(ctx, rawgID, query, 60)
+		total = len(games)
+	} else {
+		out, lerr := h.App.RAWG.ListByPlatform(ctx, rawgID, page)
+		err = lerr
+		if out != nil {
+			games = out.Items
+			total = out.Total
+		}
+	}
+	if err != nil {
+		return RespondErr(c, http.StatusBadGateway, err.Error())
+	}
+	items := make([]taggedRelease, 0, len(games))
+	for _, g := range games {
+		items = append(items, taggedRelease{
+			ReleaseID:  fmt.Sprintf("%s:%d", sourceRAWG, g.ID),
+			Title:      g.Title,
+			CoverURL:   g.CoverURL,
+			PlatformID: p.ID,
+			Source:     sourceRAWG,
+		})
+	}
+	return RespondOK(c, map[string]any{
+		"items": items, "total": total, "page": page, "hasMore": page*60 < total,
+	})
 }
 
 func (h *Handler) listIGDB(c echo.Context, p platforms.Platform, query string, page int) error {
@@ -445,6 +548,29 @@ func (h *Handler) getReleaseDetail(ctx context.Context, source string, id int) (
 			ReleaseDate: g.ReleaseDate,
 			Source:      sourceTGDB,
 		}, nil
+	case sourceRAWG:
+		if h.App.RAWG == nil || !h.App.RAWG.Configured() {
+			return nil, errors.New("RAWG non configuré")
+		}
+		g, err := h.App.RAWG.GetByID(ctx, id)
+		if err != nil || g == nil {
+			return nil, err
+		}
+		// RAWG response doesn't tell us which of our platforms — we
+		// recover it from the URL params in callers. Here we leave it
+		// empty; the frontend uses the platformId field carried in
+		// the list response when it was already shown.
+		return &taggedReleaseDetail{
+			ReleaseID:   fmt.Sprintf("%s:%d", sourceRAWG, g.ID),
+			Title:       g.Title,
+			CoverURL:    g.CoverURL,
+			Description: g.Summary,
+			Genre:       g.Genre,
+			Developer:   g.Developer,
+			Publisher:   g.Publisher,
+			ReleaseDate: g.ReleaseDate,
+			Source:      sourceRAWG,
+		}, nil
 	}
 	return nil, fmt.Errorf("source inconnue %q", source)
 }
@@ -468,7 +594,7 @@ func statusFor(err error) int {
 		return http.StatusOK
 	}
 	switch err.Error() {
-	case "OpenVGDB indisponible", "IGDB non configuré", "TheGamesDB non configuré":
+	case "OpenVGDB indisponible", "IGDB non configuré", "TheGamesDB non configuré", "RAWG non configuré":
 		return http.StatusServiceUnavailable
 	}
 	return http.StatusInternalServerError

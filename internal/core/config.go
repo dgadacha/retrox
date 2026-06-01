@@ -54,9 +54,13 @@ type Config struct {
 		// Alternative to IGDB; whichever the user picks via Preference.
 		TGDBKey string
 
+		// RAWGKey is the RAWG.io API key — easiest signup of all
+		// (email only, key visible instantly in profile).
+		RAWGKey string
+
 		// Preference selects which catalogue backend wins when multiple
-		// are configured. Values: "auto" (IGDB > TGDB > OpenVGDB),
-		// "openvgdb", "igdb", "tgdb". Empty = "auto".
+		// are configured. Values: "auto" (RAWG > IGDB > TGDB > OpenVGDB),
+		// "openvgdb", "igdb", "tgdb", "rawg". Empty = "auto".
 		Preference string
 	}
 	Library struct {
@@ -117,8 +121,9 @@ func loadConfig() (*Config, error) {
 	cfg.Metadata.IGDBClientID = os.Getenv("RETROX_IGDB_CLIENT_ID")
 	cfg.Metadata.IGDBClientSecret = os.Getenv("RETROX_IGDB_CLIENT_SECRET")
 
-	// TheGamesDB API key + source preference.
+	// TheGamesDB + RAWG + source preference.
 	cfg.Metadata.TGDBKey = os.Getenv("RETROX_TGDB_KEY")
+	cfg.Metadata.RAWGKey = os.Getenv("RETROX_RAWG_KEY")
 	cfg.Metadata.Preference = firstNonEmpty(os.Getenv("RETROX_METADATA_PREFERENCE"), "auto")
 
 	// Library roots — RETROX_ROM_DIRS is a ':'-separated list. Default

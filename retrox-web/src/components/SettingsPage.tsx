@@ -19,9 +19,10 @@ export function SettingsPage() {
 
       <div className="mx-auto w-full max-w-4xl space-y-6 px-6 py-8 lg:px-10">
         <MetadataPreferenceSection />
-        <OpenVGDBSection />
+        <RAWGSection />
         <IGDBSection />
         <TGDBSection />
+        <OpenVGDBSection />
         <ServerConfigForm />
         <ScanSection />
         <EmulatorEditor />
@@ -75,6 +76,7 @@ function MetadataPreferenceSection() {
           onChange={(e) => m.mutate(e.target.value)}
         >
           <option value="auto">Automatique (recommandé)</option>
+          <option value="rawg">RAWG.io</option>
           <option value="igdb">IGDB (Twitch)</option>
           <option value="tgdb">TheGamesDB</option>
           <option value="openvgdb">OpenVGDB (hors-ligne)</option>
@@ -87,6 +89,95 @@ function MetadataPreferenceSection() {
           </span>
         )}
       </div>
+    </Card>
+  )
+}
+
+function RAWGSection() {
+  const settingsQ = useSettings()
+  const statusQ = useStatus()
+  const qc = useQueryClient()
+  const [key, setKey] = useState("")
+  const s = settingsQ.data
+
+  const saveM = useMutation({
+    mutationFn: () => api.setRAWGKey({ key }),
+    onSuccess: () => {
+      setKey("")
+      qc.invalidateQueries({ queryKey: qk.settings })
+      qc.invalidateQueries({ queryKey: qk.status })
+      qc.invalidateQueries({ queryKey: ["catalog-platforms"] })
+    },
+  })
+
+  const configured = !!statusQ.data?.rawgConfigured
+
+  return (
+    <Card
+      title="Source de métadonnées — RAWG.io"
+      desc={
+        <>
+          La voie la plus rapide : crée un compte sur{" "}
+          <a
+            href="https://rawg.io/signup"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="text-accent-400 hover:underline"
+          >
+            rawg.io/signup
+          </a>
+          {" "}(email uniquement, pas de SMS), va sur ton{" "}
+          <a
+            href="https://rawg.io/apidocs"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="text-accent-400 hover:underline"
+          >
+            dashboard API
+          </a>
+          {" "}— la clé est visible immédiatement. Quota gratuit : 20 000 requêtes/mois.
+        </>
+      }
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        {configured ? (
+          <Badge tone="success">Connecté</Badge>
+        ) : (
+          <Badge tone="warn">Non configuré</Badge>
+        )}
+      </div>
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          saveM.mutate()
+        }}
+      >
+        <div>
+          <Label>Clé API</Label>
+          <input
+            type="password"
+            className={inputClass}
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            placeholder={s?.rawgKeySet ? "•••••• (définie)" : "non définie"}
+          />
+        </div>
+        <div className="flex items-center gap-3">
+          <Button type="submit" variant="primary" disabled={saveM.isPending}>
+            {saveM.isPending ? <Spinner className="h-4 w-4" /> : "Vérifier + enregistrer"}
+          </Button>
+          {saveM.isSuccess && (
+            <span className="inline-flex items-center gap-1.5 text-sm text-emerald-400">
+              <Check className="h-4 w-4" strokeWidth={2.5} />
+              RAWG connecté
+            </span>
+          )}
+          {saveM.isError && (
+            <span className="text-sm text-red-400">{(saveM.error as Error).message}</span>
+          )}
+        </div>
+      </form>
     </Card>
   )
 }

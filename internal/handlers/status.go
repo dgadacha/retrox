@@ -32,6 +32,7 @@ func (h *Handler) HandleStatus(c echo.Context) error {
 			"defaultProfileUid":   h.App.DefaultProfileUID(),
 			"igdbConfigured":     h.App.IGDB != nil && h.App.IGDB.Configured(),
 			"tgdbConfigured":     h.App.TGDB != nil && h.App.TGDB.Configured(),
+			"rawgConfigured":     h.App.RAWG != nil && h.App.RAWG.Configured(),
 			"metadataPreference": h.App.Config.Metadata.Preference,
 		},
 	})
