@@ -510,7 +510,10 @@ func (h *Handler) HandleCatalogCover(c echo.Context) error {
 	}
 
 	cacheDir := filepath.Join(h.App.Config.Data.Dir, "imgcache")
-	sum := sha1.Sum([]byte("catalog|" + c.Param("id") + "|" + c.QueryParam("platform")))
+	// Cache key versioned ("v2") so improvements to coverCandidates
+	// (e.g. aggressive title canonicalization) automatically invalidate
+	// stale screenshots cached under the old matcher.
+	sum := sha1.Sum([]byte("catalog-v2|" + c.Param("id") + "|" + c.QueryParam("platform")))
 	cachePath := filepath.Join(cacheDir, hex.EncodeToString(sum[:]))
 	if body, rerr := os.ReadFile(cachePath); rerr == nil {
 		return c.Blob(http.StatusOK, http.DetectContentType(body), body)

@@ -195,11 +195,17 @@ func (c *Client) MatchBoxart(ctx context.Context, libretroSystem, title string) 
 	return ""
 }
 
-// canonicalize lowercases the string and trims the trailing
-// "(region)" / "[!]" tags so "Super Mario World (USA)" and
-// "Super Mario World" hash to the same key.
+// canonicalize collapses a title to a comparison key that ignores
+// regional/revision tags AND every kind of punctuation difference
+// between databases — so "007: Tomorrow Never Dies", "007 - Tomorrow
+// Never Dies (USA)" and "007  tomorrow.never.dies" all map to
+// "007tomorrowneverdies". Aggressive on purpose: the libretro listing
+// is large enough that false positives are rare and the alternative
+// (RAWG returning gameplay screenshots instead of box art) is worse.
 func canonicalize(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
+	// Strip trailing region/rev tags first so the inner content stays
+	// matchable even when one side carries them and the other doesn't.
 	for {
 		i := strings.LastIndexAny(s, "([")
 		if i <= 0 || len(s)-i > 30 {
@@ -207,7 +213,18 @@ func canonicalize(s string) string {
 		}
 		s = strings.TrimSpace(s[:i])
 	}
-	return s
+	// Drop everything that isn't a letter or digit. "the legend of
+	// zelda" and "legend of zelda" still don't collapse — that would
+	// require article-stripping, which has too many false positives
+	// (e.g. "A Bug's Life" vs "Bug's Life").
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // fetchListing walks the GitHub Contents API (1000 entries/page) and
