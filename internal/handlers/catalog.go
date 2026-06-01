@@ -86,7 +86,7 @@ var rawgPlatformNames = map[string][]string{
 func (h *Handler) pickSource(p platforms.Platform) string {
 	pref := h.App.Config.Metadata.Preference
 	if pref == "" {
-		pref = "auto"
+		pref = "rawg"
 	}
 	igdbReady := h.App.IGDB != nil && h.App.IGDB.Configured()
 	tgdbReady := h.App.TGDB != nil && h.App.TGDB.Configured()
@@ -94,6 +94,7 @@ func (h *Handler) pickSource(p platforms.Platform) string {
 	ovgdbReady := h.App.OpenVGDB != nil && h.App.OpenVGDB.Ready()
 	hasRawgName := len(rawgPlatformNames[p.ID]) > 0
 
+	// Try the explicit preference first.
 	switch pref {
 	case "rawg":
 		if rawgReady && hasRawgName {
@@ -111,19 +112,23 @@ func (h *Handler) pickSource(p platforms.Platform) string {
 		if ovgdbReady && p.OpenVGDBID > 0 {
 			return sourceOVGDB
 		}
-	case "auto":
-		if rawgReady && hasRawgName {
-			return sourceRAWG
-		}
-		if igdbReady && p.IGDBID > 0 {
-			return sourceIGDB
-		}
-		if tgdbReady && p.TGDBID > 0 {
-			return sourceTGDB
-		}
-		if ovgdbReady && p.OpenVGDBID > 0 {
-			return sourceOVGDB
-		}
+	}
+
+	// Either the user picked "auto" or their preferred source isn't
+	// usable for this platform — walk the chain in priority order so
+	// the catalogue is never silently empty when *something* could
+	// answer.
+	if rawgReady && hasRawgName {
+		return sourceRAWG
+	}
+	if igdbReady && p.IGDBID > 0 {
+		return sourceIGDB
+	}
+	if tgdbReady && p.TGDBID > 0 {
+		return sourceTGDB
+	}
+	if ovgdbReady && p.OpenVGDBID > 0 {
+		return sourceOVGDB
 	}
 	return ""
 }

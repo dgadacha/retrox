@@ -121,10 +121,14 @@ func loadConfig() (*Config, error) {
 	cfg.Metadata.IGDBClientID = os.Getenv("RETROX_IGDB_CLIENT_ID")
 	cfg.Metadata.IGDBClientSecret = os.Getenv("RETROX_IGDB_CLIENT_SECRET")
 
-	// TheGamesDB + RAWG + source preference.
+	// TheGamesDB + RAWG + source preference. RAWG is the default
+	// because it's the easiest signup (email-only, instant key) and
+	// has the broadest, freshest coverage. Users who haven't pasted
+	// a RAWG key yet still get something via pickSource's fallback
+	// to the auto chain when the preferred source isn't ready.
 	cfg.Metadata.TGDBKey = os.Getenv("RETROX_TGDB_KEY")
 	cfg.Metadata.RAWGKey = os.Getenv("RETROX_RAWG_KEY")
-	cfg.Metadata.Preference = firstNonEmpty(os.Getenv("RETROX_METADATA_PREFERENCE"), "auto")
+	cfg.Metadata.Preference = firstNonEmpty(os.Getenv("RETROX_METADATA_PREFERENCE"), "rawg")
 
 	// Library roots — RETROX_ROM_DIRS is a ':'-separated list. Default
 	// to <binaryDir>/roms so dropping a ROM in the project folder
